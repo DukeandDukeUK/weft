@@ -27,7 +27,6 @@ final class WeftViewModel {
     var dbMissing = false
     /// First launch before Full Disk Access is granted.
     var needsFullDiskAccess = false
-    private var accessWatch: Task<Void, Never>?
     var topicsStale = false
     /// Incremented to ask the message list to scroll to bottom (topic change, send).
     var scrollToken = 0
@@ -106,8 +105,9 @@ final class WeftViewModel {
         case .ok:
             needsFullDiskAccess = false
         case .noPermission:
+            // macOS shows its own "Quit & Reopen" prompt when the switch is
+            // turned on, so Weft just waits for that.
             needsFullDiskAccess = true
-            watchForAccess()
             return
         case .missing:
             dbMissing = true
@@ -125,36 +125,6 @@ final class WeftViewModel {
         } else {
             showChatPicker = true
         }
-    }
-
-    /// macOS only applies Full Disk Access to Weft after it restarts. While
-    /// the setup screen is up, ask a fresh helper process every 2 seconds
-    /// whether access is now on, and restart Weft by itself when it is.
-    /// (The "Quit & Reopen" button does the same thing by hand.)
-    private func watchForAccess() {
-        accessWatch?.cancel()
-        accessWatch = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                if await Self.freshProcessCanReadMessages() {
-                    self?.relaunch()
-                    return
-                }
-            }
-        }
-    }
-
-    private static func freshProcessCanReadMessages() async -> Bool {
-        await Task.detached {
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: "/bin/ls")
-            proc.arguments = [(NSHomeDirectory() as NSString).appendingPathComponent("Library/Messages")]
-            proc.standardOutput = FileHandle.nullDevice
-            proc.standardError = FileHandle.nullDevice
-            guard (try? proc.run()) != nil else { return false }
-            proc.waitUntilExit()
-            return proc.terminationStatus == 0
-        }.value
     }
 
     /// Restart Weft so macOS applies newly granted Full Disk Access.

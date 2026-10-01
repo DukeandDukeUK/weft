@@ -98,8 +98,8 @@ struct StaleBanner: View {
 
 // MARK: - FullDiskAccessView
 
-/// First-launch screen: one click opens the exact Settings page, and Weft
-/// carries on by itself once access is turned on.
+/// First-launch screen: one click opens the exact Settings page; macOS then
+/// offers "Quit & Reopen" itself when the switch is turned on.
 struct FullDiskAccessView: View {
     @Bindable var viewModel: WeftViewModel
     @Environment(\.openURL) private var openURL
@@ -136,7 +136,7 @@ struct FullDiskAccessView: View {
             .controlSize(.large)
             .keyboardShortcut(.defaultAction)
 
-            Text("Click the button, then turn on the switch next to **Weft**. Weft will reopen by itself.")
+            Text("Click the button, then turn on the switch next to **Weft**. When macOS asks, click **Quit & Reopen**.")
                 .font(.callout)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 460)
@@ -149,11 +149,11 @@ struct FullDiskAccessView: View {
             if openedSettings {
                 HStack(spacing: 6) {
                     ProgressView().scaleEffect(0.6)
-                    Text("Waiting for the switch…").font(.caption).foregroundStyle(.secondary)
+                    Text("Waiting for you to turn on the switch…").font(.caption).foregroundStyle(.secondary)
                 }
             }
             if showManualRestart {
-                Button("Switch is on but nothing happened? Quit & Reopen Weft") { viewModel.relaunch() }
+                Button("Clicked “Later” on the macOS prompt? Quit & Reopen Weft") { viewModel.relaunch() }
                     .buttonStyle(.link)
                     .font(.caption)
             }
