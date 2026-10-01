@@ -8,6 +8,9 @@ If you text an AI assistant (or anyone) about everything in one long conversatio
 - **Reply inside a thread.** Your reply is sent through Messages as you. It starts with "Re: <thread> —", so the other side knows which subject you mean (you can turn this off).
 - **Open loops.** Weft keeps a list of requests that haven't been answered yet and promises that haven't been kept, and checks them off when they're done.
 - **Search** across the whole conversation.
+- **Reactions** (❤️ 👍 ✅ …) show on messages just like in Messages.
+- **Contact names** next to phone numbers, if you allow Contacts access.
+- **Automatic updates.** Weft checks for new versions and offers to install them (Weft → Check for Updates…).
 
 Weft never changes your Messages history. It only reads it, and sends a message when you press Send.
 
@@ -40,7 +43,7 @@ Weft uses an AI you already have. **It never asks for an API key**: the subscrip
 | **Ollama** | Nothing to pay for: install [Ollama](https://ollama.com/download) and Weft downloads a model for you | Stays on your Mac |
 | **LM Studio** | Nothing to pay for: install [LM Studio](https://lmstudio.ai), load a model, start its server | Stays on your Mac |
 
-Settings shows which of these are already on your Mac.
+Settings shows which of these are already on your Mac, and offers a **Model** menu for each with the recommended choice marked. If you use a local model and a better one suits your Mac, Weft offers to download it.
 
 **No subscription?** Choose **Ollama (local)** in Settings. Install Ollama from the link Weft shows, come back, and click **Download** to get the recommended model (about 2.5–5 GB, depending on your Mac's memory). Local models are free and private, but they sort less well than the subscription AIs and can only look at a shorter stretch of the conversation at a time.
 
@@ -51,6 +54,8 @@ Sorting uses a small amount of your plan's usage each time new messages arrive. 
 - Weft reads your Messages history **only on your Mac** and never changes it.
 - To sort, Weft sends the text of the conversation you picked to the AI you chose, and nothing else. With Ollama or LM Studio, nothing leaves your Mac.
 - Weft has no account, no server, no analytics and no tracking. Topics and open loops are saved in `~/Library/Application Support/Weft/`.
+- At launch Weft contacts GitHub to check for updates and to read its model recommendations (`recommendations.json` in this project). GitHub sees your internet address; no messages or personal data are sent.
+- Contacts access is optional and only used to show names next to numbers on your Mac.
 
 ## Limitations
 

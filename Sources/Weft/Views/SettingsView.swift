@@ -130,8 +130,17 @@ struct ChatPickerView: View {
                         dismiss()
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(chat.participants.isEmpty ? "(unknown participant)" : chat.participants)
-                                .lineLimit(1)
+                            if chat.participants.isEmpty {
+                                Text("(unknown participant)").lineLimit(1)
+                            } else if ContactNames.shared.shortDisplay(chat.participants) != chat.participants {
+                                // Known contact: name first, number after.
+                                HStack(spacing: 6) {
+                                    Text(ContactNames.shared.shortDisplay(chat.participants)).bold().lineLimit(1)
+                                    Text(chat.participants).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                            } else {
+                                Text(chat.participants).lineLimit(1)
+                            }
                             HStack(spacing: 4) {
                                 Text("\(chat.messageCount) messages")
                                 if let date = chat.lastDate {
@@ -155,5 +164,6 @@ struct ChatPickerView: View {
             }
         }
         .frame(minWidth: 480, minHeight: 420)
+        .task { await ContactNames.shared.load() }
     }
 }

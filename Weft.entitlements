@@ -5,5 +5,8 @@
     <!-- Send replies by driving the Messages app (Apple Events). -->
     <key>com.apple.security.automation.apple-events</key>
     <true/>
+    <!-- Show contact names next to phone numbers (hardened runtime needs this). -->
+    <key>com.apple.security.personal-information.addressbook</key>
+    <true/>
 </dict>
 </plist>

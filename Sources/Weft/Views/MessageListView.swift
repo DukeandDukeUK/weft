@@ -123,12 +123,39 @@ struct MessageRow: View {
                     .background(message.isFromMe ? Color.accentColor : Color.secondary.opacity(0.15))
                     .foregroundStyle(message.isFromMe ? .white : .primary)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
+                    // Reactions sit on the bubble's top corner, like Messages.
+                    .overlay(alignment: message.isFromMe ? .topLeading : .topTrailing) {
+                        if !message.reactions.isEmpty {
+                            ReactionBadge(reactions: message.reactions)
+                                .offset(x: message.isFromMe ? -12 : 12, y: -12)
+                        }
+                    }
+                    .padding(.top, message.reactions.isEmpty ? 0 : 10)
                 Text(Self.timeFormatter.string(from: message.date))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
             if !message.isFromMe { Spacer(minLength: 48) }
         }
+    }
+}
+
+// MARK: - ReactionBadge
+
+struct ReactionBadge: View {
+    let reactions: [Reaction]
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(Array(reactions.enumerated()), id: \.offset) { _, reaction in
+                Text(reaction.emoji).font(.system(size: 13))
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(.regularMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.25)))
+        .help(reactions.map { "\($0.isFromMe ? "You" : "Them"): \($0.emoji)" }.joined(separator: "\n"))
     }
 }
 

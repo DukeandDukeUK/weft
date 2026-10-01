@@ -11,12 +11,60 @@ struct ChatMessage: Identifiable, Sendable, Hashable {
     let date: Date
     /// Phone number or email of the other participant ("" when unknown).
     let handleId: String
+    /// message.guid — what reactions point at.
+    var guid: String = ""
+    /// Reactions (tapbacks / emoji) currently attached to this message.
+    var reactions: [Reaction] = []
 
     /// iMessage stores `message.date` as INTEGER nanoseconds since the Cocoa
     /// epoch (2001-01-01 00:00:00 UTC). 978307200 is the number of seconds
     /// between the Unix epoch (1970) and the Cocoa epoch (2001).
     static func dateFromAppleTimestamp(_ nanos: Int64) -> Date {
         Date(timeIntervalSince1970: Double(nanos) / 1_000_000_000 + 978307200)
+    }
+}
+
+// MARK: - Reaction
+
+/// A tapback or emoji reaction on a message. Messages stores each one as its
+/// own row pointing at the target message's guid.
+struct Reaction: Sendable, Hashable {
+    let emoji: String
+    let isFromMe: Bool
+}
+
+/// One reaction row as read from the database: an add or a removal.
+struct ReactionEvent: Sendable {
+    let rowID: Int64
+    let targetGuid: String
+    let emoji: String
+    let isFromMe: Bool
+    let isRemoval: Bool
+
+    /// associated_message_type: 2000–2007 add, 3000–3007 remove the same kind.
+    /// 2006 is an any-emoji reaction (the emoji is in associated_message_emoji).
+    static func emoji(forType type: Int64, custom: String?) -> String? {
+        switch type % 1000 {
+        case 0: return "❤️"
+        case 1: return "👍"
+        case 2: return "👎"
+        case 3: return "😂"
+        case 4: return "‼️"
+        case 5: return "❓"
+        case 6: return (custom?.isEmpty == false) ? custom : nil
+        default: return nil
+        }
+    }
+
+    /// "p:0/GUID" or "bp:GUID" → "GUID".
+    static func targetGuid(from associated: String) -> String {
+        if let slash = associated.lastIndex(of: "/") {
+            return String(associated[associated.index(after: slash)...])
+        }
+        if let colon = associated.firstIndex(of: ":") {
+            return String(associated[associated.index(after: colon)...])
+        }
+        return associated
     }
 }
 

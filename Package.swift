@@ -10,10 +10,19 @@ let package = Package(
     products: [
         .executable(name: "Weft", targets: ["Weft"])
     ],
+    dependencies: [
+        // Automatic updates for apps distributed outside the App Store.
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0")
+    ],
     targets: [
         .executableTarget(
             name: "Weft",
-            path: "Sources/Weft"
+            dependencies: [.product(name: "Sparkle", package: "Sparkle")],
+            path: "Sources/Weft",
+            linkerSettings: [
+                // Sparkle.framework ships inside Weft.app/Contents/Frameworks.
+                .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])
+            ]
         )
     ],
     swiftLanguageModes: [.v5]

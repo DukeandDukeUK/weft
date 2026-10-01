@@ -30,7 +30,8 @@ fi
 echo "==> Building (release, Apple Silicon + Intel)…"
 swift build -c release --arch arm64 --arch x86_64
 
-BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/$EXEC_NAME"
+BIN_DIR="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)"
+BIN="$BIN_DIR/$EXEC_NAME"
 if [ ! -f "$BIN" ]; then
     echo "error: expected binary not found at $BIN" >&2
     exit 1
@@ -40,6 +41,12 @@ echo "==> Assembling ${APP_DIR}…"
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$BIN" "$APP_DIR/Contents/MacOS/$EXEC_NAME"
+
+# Sparkle (automatic updates). ditto keeps the framework's internal symlinks.
+mkdir -p "$APP_DIR/Contents/Frameworks"
+ditto "$BIN_DIR/Sparkle.framework" "$APP_DIR/Contents/Frameworks/Sparkle.framework"
+# The Downloader service is only needed by sandboxed apps; Weft isn't one.
+rm -rf "$APP_DIR/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc"
 
 echo "==> Drawing icon…"
 swift scripts/make-icon.swift "$OUT_DIR" >/dev/null
@@ -74,6 +81,14 @@ cat > "$APP_DIR/Contents/Info.plist" <<EOF
     <string>public.app-category.productivity</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>Weft sends your replies through the Messages app.</string>
+    <key>NSContactsUsageDescription</key>
+    <string>Weft shows contact names next to phone numbers so you can find your conversation.</string>
+    <key>SUFeedURL</key>
+    <string>https://github.com/DukeandDukeUK/weft/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>UrFI52Nv0o1NgZOQqLk9j9NXkehx9GIMlCthDXp4QN4=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsLocalNetworking</key>
@@ -92,13 +107,20 @@ if [ -n "$IDENTITY" ]; then
     echo "==> Signing with: $IDENTITY"
     # Hardened runtime + secure timestamp are required for notarization.
     # The Apple Events entitlement lets the hardened app drive Messages.
+    # Sparkle's parts first, innermost to outermost (Sparkle's documented
+    # order), then the app itself.
+    SPK="$APP_DIR/Contents/Frameworks/Sparkle.framework"
+    codesign -f -s "$IDENTITY" -o runtime --timestamp "$SPK/Versions/B/XPCServices/Installer.xpc"
+    codesign -f -s "$IDENTITY" -o runtime --timestamp "$SPK/Versions/B/Autoupdate"
+    codesign -f -s "$IDENTITY" -o runtime --timestamp "$SPK/Versions/B/Updater.app"
+    codesign -f -s "$IDENTITY" -o runtime --timestamp "$SPK"
     codesign --force --options runtime --timestamp \
         --entitlements Weft.entitlements \
         --sign "$IDENTITY" "$APP_DIR"
-    codesign --verify --strict --verbose=1 "$APP_DIR"
+    codesign --verify --deep --strict --verbose=1 "$APP_DIR"
 else
     echo "==> No Developer ID certificate found — ad-hoc signing (this Mac only)…"
-    codesign --force --sign - "$APP_DIR" >/dev/null
+    codesign --force --deep --sign - "$APP_DIR" >/dev/null
 fi
 
 echo ""

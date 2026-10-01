@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "providers": {
+    "claude": {
+      "recommended": "claude-sonnet-5-5",
+      "note": "Sorts well and uses little of your plan.",
+      "models": [
+        { "id": "claude-sonnet-5-5", "label": "Sonnet 5.5" },
+        { "id": "claude-opus-5-5", "label": "Opus 5.5" },
+        { "id": "claude-haiku-4-5-20251001", "label": "Haiku 4.5" }
+      ]
+    },
+    "codex": {
+      "recommended": "gpt-6-luna",
+      "note": "Light on your ChatGPT plan's usage."
+    },
+    "grok": {
+      "recommended": "grok-4.7",
+      "note": "Grok's current default."
+    },
+    "gemini": {
+      "note": "Uses the Gemini CLI's own default model."
+    },
+    "ollama": {
+      "note": "Free and private; sized to this Mac's memory.",
+      "localTiers": [
+        { "minMemoryGB": 16, "model": "qwen3:8b", "size": "5 GB" },
+        { "minMemoryGB": 0, "model": "qwen3:4b", "size": "2.5 GB" }
+      ]
+    },
+    "lmstudio": {
+      "note": "Uses whichever model you have loaded in LM Studio."
+    }
+  }
+}

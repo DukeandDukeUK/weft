@@ -173,7 +173,7 @@ actor ChatDBReader {
     func fetchMessages(chatRowID: Int64, after: Int64? = nil) throws -> [ChatMessage] {
         var sql = """
             SELECT m.ROWID, m.text, m.attributedBody, m.is_from_me, m.date,
-                   COALESCE(h.id, ''), m.cache_has_attachments
+                   COALESCE(h.id, ''), m.cache_has_attachments, m.guid
               FROM message m
               JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
             LEFT JOIN handle h ON h.ROWID = m.handle_id
@@ -203,7 +203,40 @@ actor ChatDBReader {
                 text: final.isEmpty ? "[attachment]" : final,
                 isFromMe: columnInt64(stmt, 3) != 0,
                 date: ChatMessage.dateFromAppleTimestamp(dateValue),
-                handleId: columnString(stmt, 5) ?? ""
+                handleId: columnString(stmt, 5) ?? "",
+                guid: columnString(stmt, 7) ?? ""
+            )
+        }
+    }
+
+    /// Reaction rows (adds and removals) in this conversation, oldest first.
+    /// - Parameter after: only rows with ROWID greater than this (polling).
+    func fetchReactions(chatRowID: Int64, after: Int64 = 0) throws -> [ReactionEvent] {
+        let sql = """
+            SELECT m.ROWID, m.associated_message_guid, m.associated_message_type,
+                   m.associated_message_emoji, m.is_from_me
+              FROM message m
+              JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+             WHERE cmj.chat_id = ?
+               AND m.ROWID > ?
+               AND m.associated_message_guid IS NOT NULL
+               AND ((m.associated_message_type BETWEEN 2000 AND 2007)
+                 OR (m.associated_message_type BETWEEN 3000 AND 3007))
+             ORDER BY m.date ASC, m.ROWID ASC
+            """
+        return try query(sql, bind: { stmt in
+            sqlite3_bind_int64(stmt, 1, chatRowID)
+            sqlite3_bind_int64(stmt, 2, after)
+        }) { stmt in
+            let type = columnInt64(stmt, 2)
+            guard let associated = columnString(stmt, 1),
+                  let emoji = ReactionEvent.emoji(forType: type, custom: columnString(stmt, 3)) else { return nil }
+            return ReactionEvent(
+                rowID: columnInt64(stmt, 0),
+                targetGuid: ReactionEvent.targetGuid(from: associated),
+                emoji: emoji,
+                isFromMe: columnInt64(stmt, 4) != 0,
+                isRemoval: type >= 3000
             )
         }
     }

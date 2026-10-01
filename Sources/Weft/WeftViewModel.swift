@@ -27,6 +27,10 @@ final class WeftViewModel {
     var dbMissing = false
     /// First launch before Full Disk Access is granted.
     var needsFullDiskAccess = false
+    /// Set when Ollama is the sorter and a better model for this Mac is
+    /// recommended but not downloaded yet.
+    var betterLocalModel: Recommendations.LocalTier?
+    let localPull = OllamaPull()
     var topicsStale = false
     /// Incremented to ask the message list to scroll to bottom (topic change, send).
     var scrollToken = 0
@@ -42,6 +46,8 @@ final class WeftViewModel {
     private var isPolling = false
     private var autoSortTask: Task<Void, Never>?
     private var lastSeenRowID: Int64 = 0
+    /// Newest reaction row applied (reactions are separate rows in chat.db).
+    private var lastReactionRowID: Int64 = 0
     /// Where each pending message is shown until Claude files it.
     private var provisionalTopic: [Int64: UUID] = [:]
     /// The thread you last replied in from this app. Your message and
@@ -95,7 +101,9 @@ final class WeftViewModel {
     static let noAIMessage = "No AI is set up to sort messages yet. Open Settings (gear icon) and pick one."
 
     func startup() async {
+        await RecommendationStore.shared.refresh()
         await settings.autoPickProviderIfNeeded()
+        await checkForBetterLocalModel()
         isLoading = true
         defer { isLoading = false }
         notice = nil
@@ -104,6 +112,8 @@ final class WeftViewModel {
         switch await reader.checkAccess() {
         case .ok:
             needsFullDiskAccess = false
+            // Names for the picker and title (asks for Contacts once).
+            await ContactNames.shared.load()
         case .noPermission:
             // macOS shows its own "Quit & Reopen" prompt when the switch is
             // turned on, so Weft just waits for that.
@@ -152,6 +162,8 @@ final class WeftViewModel {
         do {
             messages = try await ChatDBReader.shared.fetchMessages(chatRowID: chat.id)
             lastSeenRowID = messages.last?.id ?? 0
+            lastReactionRowID = 0
+            await applyNewReactions(chatRowID: chat.id)
             pendingMessageIDs = []
             provisionalTopic = [:]
             // Restore the saved topics, then file anything that arrived while
@@ -208,9 +220,13 @@ final class WeftViewModel {
             let fresh = try await ChatDBReader.shared
                 .fetchMessages(chatRowID: chatId, after: lastSeenRowID)
                 .filter { !known.contains($0.id) }
+            if !fresh.isEmpty {
+                messages.append(contentsOf: fresh)
+                lastSeenRowID = max(lastSeenRowID, fresh.map(\.id).max() ?? 0)
+            }
+            // Reactions can arrive on their own, after the message they're on.
+            await applyNewReactions(chatRowID: chatId)
             guard !fresh.isEmpty else { return }
-            messages.append(contentsOf: fresh)
-            lastSeenRowID = max(lastSeenRowID, fresh.map(\.id).max() ?? 0)
             let unfiled = fileIntoActiveThread(fresh)
             if !unfiled.isEmpty {
                 showProvisionally(unfiled)
@@ -256,6 +272,62 @@ final class WeftViewModel {
             notice = "Sorting failed: \(error.localizedDescription)"
         }
         if !pendingMessageIDs.isEmpty { scheduleAutoSort(after: 3) }
+    }
+
+    // MARK: - Better local model
+
+    private static func dismissedKey(_ model: String) -> String { "weft.dismissedModel.\(model)" }
+
+    func checkForBetterLocalModel() async {
+        betterLocalModel = nil
+        guard settings.provider == .ollama,
+              let tier = RecommendationStore.shared.current.recommendedLocalModel(),
+              settings.effectiveModel(for: .ollama) != tier.model,
+              !UserDefaults.standard.bool(forKey: Self.dismissedKey(tier.model)),
+              let installed = await LocalServer.listModels(.ollama),
+              !installed.contains(tier.model) else { return }
+        betterLocalModel = tier
+    }
+
+    func dismissBetterLocalModel() {
+        if let model = betterLocalModel?.model {
+            UserDefaults.standard.set(true, forKey: Self.dismissedKey(model))
+        }
+        betterLocalModel = nil
+    }
+
+    /// Download the recommended model and switch sorting to it.
+    func installBetterLocalModel() async {
+        guard let tier = betterLocalModel else { return }
+        await localPull.run(model: tier.model)
+        if localPull.error == nil {
+            settings.setModel(tier.model, for: .ollama)
+            betterLocalModel = nil
+        }
+    }
+
+    // MARK: - Reactions
+
+    /// Apply reaction rows newer than the last one seen: each person has at
+    /// most one reaction of a kind per message; a removal row takes it back.
+    private func applyNewReactions(chatRowID: Int64) async {
+        guard let events = try? await ChatDBReader.shared.fetchReactions(chatRowID: chatRowID, after: lastReactionRowID),
+              !events.isEmpty else { return }
+        lastReactionRowID = events.map(\.rowID).max() ?? lastReactionRowID
+        var indexByGuid: [String: Int] = [:]
+        for (i, m) in messages.enumerated() where !m.guid.isEmpty { indexByGuid[m.guid] = i }
+        for event in events {
+            guard let i = indexByGuid[event.targetGuid] else { continue }
+            var reactions = messages[i].reactions
+            if event.isRemoval {
+                reactions.removeAll { $0.isFromMe == event.isFromMe && $0.emoji == event.emoji }
+            } else {
+                // Classic tapbacks replace the same person's previous one.
+                reactions.removeAll { $0.isFromMe == event.isFromMe }
+                reactions.append(Reaction(emoji: event.emoji, isFromMe: event.isFromMe))
+            }
+            messages[i].reactions = reactions
+        }
     }
 
     // MARK: - Automatic filing

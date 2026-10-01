@@ -78,7 +78,7 @@ struct SidebarView: View {
     }
 
     private func chatTitle(_ chat: ChatInfo) -> String {
-        chat.participants.isEmpty ? "Conversation" : chat.participants
+        chat.participants.isEmpty ? "Conversation" : ContactNames.shared.display(chat.participants)
     }
 }
 

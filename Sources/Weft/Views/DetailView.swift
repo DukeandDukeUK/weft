@@ -8,6 +8,9 @@ struct DetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if let tier = viewModel.betterLocalModel {
+                BetterModelBanner(viewModel: viewModel, tier: tier)
+            }
             if let notice = viewModel.notice {
                 NoticeBanner(text: notice) { viewModel.dismissNotice() }
             }
@@ -93,6 +96,38 @@ struct StaleBanner: View {
         }
         .padding(10)
         .background(Color.blue.opacity(0.08))
+    }
+}
+
+// MARK: - BetterModelBanner
+
+/// "A better local model is available" — download with progress, or dismiss.
+struct BetterModelBanner: View {
+    @Bindable var viewModel: WeftViewModel
+    let tier: Recommendations.LocalTier
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "sparkles")
+            if viewModel.localPull.isRunning {
+                ProgressView(value: viewModel.localPull.fraction) {
+                    Text("Downloading \(tier.model)… \(viewModel.localPull.status)").font(.caption)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("A better local model is available for this Mac: **\(tier.model)** (about \(tier.size)).")
+                        .font(.callout)
+                    if let error = viewModel.localPull.error {
+                        Text(error).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Button("Download") { Task { await viewModel.installBetterLocalModel() } }
+                Button("Not now") { viewModel.dismissBetterLocalModel() }
+            }
+        }
+        .padding(10)
+        .background(Color.accentColor.opacity(0.08))
     }
 }
 

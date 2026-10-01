@@ -34,11 +34,14 @@ enum Provider: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Model used when the Model field is empty. Empty = the tool's own default.
+    /// Fallback when no recommendation is available. Empty = the tool's own
+    /// default. Normally RecommendationStore supplies the suggestion.
     var defaultModel: String {
         switch self {
         case .claude: return "claude-sonnet-5-5"
-        case .codex, .gemini, .grok, .ollama, .lmstudio: return ""
+        case .codex: return "gpt-6-luna"
+        case .grok: return "grok-4.7"
+        case .gemini, .ollama, .lmstudio: return ""
         }
     }
 

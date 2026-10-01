@@ -61,5 +61,19 @@ xcrun notarytool submit "$DMG" --keychain-profile "$PROFILE" --wait
 xcrun stapler staple "$DMG"
 spctl --assess --type open --context context:primary-signature --verbose "$DMG"
 
+# Sparkle update feed: lists this version, signed with the update key in
+# your keychain (account "weft"). Upload appcast.xml with every release —
+# installed copies read it from .../releases/latest/download/appcast.xml.
+echo "==> Writing the update feed (appcast.xml)…"
+SPARKLE_BIN=".build/artifacts/sparkle/Sparkle/bin"
+FEED_DIR="$DIST/feed"
+rm -rf "$FEED_DIR" && mkdir -p "$FEED_DIR"
+cp "$DMG" "$FEED_DIR/"
+"$SPARKLE_BIN/generate_appcast" --account weft \
+    --download-url-prefix "https://github.com/DukeandDukeUK/weft/releases/download/v$VERSION/" \
+    --link "https://github.com/DukeandDukeUK/weft" \
+    -o "$DIST/appcast.xml" "$FEED_DIR"
+rm -rf "$FEED_DIR"
+
 echo ""
-echo "Ready to upload: $DMG"
+echo "Ready to upload: $DMG and $DIST/appcast.xml"

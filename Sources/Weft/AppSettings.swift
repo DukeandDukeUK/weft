@@ -73,10 +73,15 @@ final class AppSettings {
         provider = first
     }
 
+    /// The model actually used: your choice, or the recommended one.
+    func effectiveModel(for provider: Provider) -> String {
+        let chosen = model(for: provider)
+        return chosen.isEmpty ? RecommendationStore.shared.recommendedModel(for: provider) : chosen
+    }
+
     /// Nil when no provider is set up yet.
     func makeClient() -> LLMClient? {
         guard let provider else { return nil }
-        let chosen = model(for: provider)
-        return LLMClient(provider: provider, model: chosen.isEmpty ? provider.defaultModel : chosen)
+        return LLMClient(provider: provider, model: effectiveModel(for: provider))
     }
 }

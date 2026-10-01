@@ -15,6 +15,9 @@ struct AISettingsSection: View {
     @State private var isTesting = false
     @State private var modelDraft = ""
     @State private var pull = OllamaPull()
+    @State private var options: [ModelCatalog.Option] = []
+    @State private var typingOther = false
+    private var store: RecommendationStore { RecommendationStore.shared }
 
     private var settings: AppSettings { viewModel.settings }
 
@@ -25,7 +28,9 @@ struct AISettingsSection: View {
                 set: { newValue in
                     settings.provider = newValue
                     testResult = nil
+                    typingOther = false
                     modelDraft = newValue.map { settings.model(for: $0) } ?? ""
+                    Task { await loadOptions() }
                 }
             )) {
                 Text("Choose…").tag(Provider?.none)
@@ -53,6 +58,8 @@ struct AISettingsSection: View {
         .task {
             modelDraft = settings.provider.map { settings.model(for: $0) } ?? ""
             await detect()
+            await store.refresh()
+            await loadOptions()
         }
     }
 
@@ -74,22 +81,51 @@ struct AISettingsSection: View {
             .foregroundStyle(.secondary)
     }
 
+    /// Menu of the models this provider offers, recommended one first and
+    /// marked; "Other…" lets you type any model name.
     @ViewBuilder
     private func modelRow(_ provider: Provider, status: ProviderStatus?) -> some View {
-        if provider.isLocal, let models = status?.localModels, !models.isEmpty {
-            Picker("Model", selection: Binding(
-                get: { settings.model(for: provider) },
-                set: { settings.setModel($0, for: provider); testResult = nil }
-            )) {
-                if settings.model(for: provider).isEmpty { Text("Choose…").tag("") }
-                ForEach(models, id: \.self) { Text($0).tag($0) }
+        let recommended = store.recommendedModel(for: provider)
+        let selected = settings.effectiveModel(for: provider)
+        let ordered = options.filter { $0.id == recommended } + options.filter { $0.id != recommended }
+
+        Picker("Model", selection: Binding(
+            get: { typingOther ? "__other__" : (ordered.contains { $0.id == selected } || selected.isEmpty ? selected : "__other__") },
+            set: { value in
+                testResult = nil
+                if value == "__other__" {
+                    typingOther = true
+                    modelDraft = settings.model(for: provider)
+                } else {
+                    typingOther = false
+                    settings.setModel(value, for: provider)
+                }
             }
-        } else {
-            TextField("Model", text: $modelDraft, prompt: Text(provider.defaultModel.isEmpty ? "Default" : provider.defaultModel))
+        )) {
+            if recommended.isEmpty {
+                Text("Default (the tool chooses) — Recommended").tag("")
+            }
+            ForEach(ordered) { option in
+                Text(option.id == recommended ? "\(option.label) — Recommended" : option.label).tag(option.id)
+            }
+            Divider()
+            Text("Other…").tag("__other__")
+        }
+
+        if typingOther || (!selected.isEmpty && !ordered.contains { $0.id == selected }) {
+            TextField("Model name", text: $modelDraft, prompt: Text("Exact model name"))
                 .onSubmit { settings.setModel(modelDraft, for: provider) }
                 .onChange(of: modelDraft) { _, value in settings.setModel(value, for: provider) }
-                .help("Leave empty to use the tool's default model.")
         }
+
+        if let note = store.current.entry(provider)?.note {
+            Text(note).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func loadOptions() async {
+        guard let provider = settings.provider else { options = []; return }
+        options = await ModelCatalog.options(for: provider, status: statuses[provider], recommendations: store.current)
     }
 
     private func testRow(_ provider: Provider) -> some View {
@@ -134,7 +170,8 @@ struct AISettingsSection: View {
 
     @ViewBuilder
     private func ollamaSetup(status: ProviderStatus) -> some View {
-        let recommended = OllamaPull.recommendedModel
+        let tier = store.current.recommendedLocalModel()
+        let recommended = (name: tier?.model ?? "qwen3:4b", size: tier?.size ?? "2.5 GB")
         if status.detail == "not running" {
             VStack(alignment: .leading, spacing: 8) {
                 Text("**Free option, private to this Mac.** Two steps:")
@@ -178,6 +215,7 @@ struct AISettingsSection: View {
         isDetecting = true
         statuses = await ProviderDetector.detectAll()
         isDetecting = false
+        await loadOptions()
         // A local provider with one model downloaded and none chosen: use it.
         if let provider = settings.provider, provider.isLocal, settings.model(for: provider).isEmpty,
            let first = statuses[provider]?.localModels.first {
@@ -210,12 +248,6 @@ final class OllamaPull {
     var fraction: Double = 0
     var status = ""
     var error: String?
-
-    /// Smaller model on Macs with less memory, so it actually fits.
-    static var recommendedModel: (name: String, size: String) {
-        let gb = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
-        return gb >= 16 ? ("qwen3:8b", "5 GB") : ("qwen3:4b", "2.5 GB")
-    }
 
     func run(model: String) async {
         isRunning = true
