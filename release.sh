@@ -20,7 +20,8 @@ ZIP="$DIST/Weft-$VERSION.zip"
 
 VERSION="$VERSION" ./make-app.sh
 
-if ! codesign -dv "$APP" 2>&1 | grep -q "Authority=Developer ID Application"; then
+SIGNATURE="$(codesign -dvv "$APP" 2>&1)"
+if [[ "$SIGNATURE" != *"Authority=Developer ID Application"* ]]; then
     echo "error: the app isn't signed with a Developer ID certificate, so it can't be notarized." >&2
     exit 1
 fi
