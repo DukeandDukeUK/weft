@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 // MARK: - WeftViewModel
 
@@ -24,6 +25,9 @@ final class WeftViewModel {
     var isSending = false
     var notice: String?
     var dbMissing = false
+    /// First launch before Full Disk Access is granted.
+    var needsFullDiskAccess = false
+    private var accessWatch: Task<Void, Never>?
     var topicsStale = false
     /// Incremented to ask the message list to scroll to bottom (topic change, send).
     var scrollToken = 0
@@ -98,7 +102,14 @@ final class WeftViewModel {
         notice = nil
         dbMissing = false
         let reader = ChatDBReader.shared
-        guard await reader.databaseExists() else {
+        switch await reader.checkAccess() {
+        case .ok:
+            needsFullDiskAccess = false
+        case .noPermission:
+            needsFullDiskAccess = true
+            watchForAccess()
+            return
+        case .missing:
             dbMissing = true
             return
         }
@@ -114,6 +125,46 @@ final class WeftViewModel {
         } else {
             showChatPicker = true
         }
+    }
+
+    /// macOS only applies Full Disk Access to Weft after it restarts. While
+    /// the setup screen is up, ask a fresh helper process every 2 seconds
+    /// whether access is now on, and restart Weft by itself when it is.
+    /// (The "Quit & Reopen" button does the same thing by hand.)
+    private func watchForAccess() {
+        accessWatch?.cancel()
+        accessWatch = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                if await Self.freshProcessCanReadMessages() {
+                    self?.relaunch()
+                    return
+                }
+            }
+        }
+    }
+
+    private static func freshProcessCanReadMessages() async -> Bool {
+        await Task.detached {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/bin/ls")
+            proc.arguments = [(NSHomeDirectory() as NSString).appendingPathComponent("Library/Messages")]
+            proc.standardOutput = FileHandle.nullDevice
+            proc.standardError = FileHandle.nullDevice
+            guard (try? proc.run()) != nil else { return false }
+            proc.waitUntilExit()
+            return proc.terminationStatus == 0
+        }.value
+    }
+
+    /// Restart Weft so macOS applies newly granted Full Disk Access.
+    func relaunch() {
+        let path = Bundle.main.bundlePath
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/sh")
+        proc.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", path]
+        try? proc.run()
+        NSApplication.shared.terminate(nil)
     }
 
     func selectChat(_ chat: ChatInfo) async {

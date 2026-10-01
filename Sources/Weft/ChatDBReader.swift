@@ -76,6 +76,38 @@ actor ChatDBReader {
         (NSHomeDirectory() as NSString).appendingPathComponent("Library/Messages/chat.db")
     }
 
+    enum Access: Sendable {
+        case ok
+        /// macOS is blocking the Messages folder: Full Disk Access not granted.
+        case noPermission
+        /// Genuinely no Messages history on this Mac.
+        case missing
+    }
+
+    /// Tells "not allowed to look" apart from "nothing there". Without Full
+    /// Disk Access the Messages folder can't even be listed, which would
+    /// otherwise look like a missing database.
+    func checkAccess() -> Access {
+        let folder = (NSHomeDirectory() as NSString).appendingPathComponent("Library/Messages")
+        do {
+            _ = try FileManager.default.contentsOfDirectory(atPath: folder)
+        } catch let error as NSError {
+            let posix = (error.userInfo[NSUnderlyingErrorKey] as? NSError)?.code
+            if error.code == NSFileReadNoPermissionError || posix == Int(EPERM) || posix == Int(EACCES) {
+                return .noPermission
+            }
+            return .missing
+        }
+        guard databaseExists() else { return .missing }
+        do {
+            let db = try open()
+            sqlite3_close(db)
+            return .ok
+        } catch {
+            return .noPermission
+        }
+    }
+
     func databaseExists() -> Bool {
         FileManager.default.fileExists(atPath: dbPath)
     }
