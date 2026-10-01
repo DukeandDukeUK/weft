@@ -19,8 +19,8 @@ Weft never changes your Messages history. It only reads it, and sends a message 
 
 ## Install
 
-1. Download the latest **Weft-x.y.z.zip** from [Releases](../../releases).
-2. Unzip it and drag **Weft** to your **Applications** folder.
+1. Download the latest **Weft-x.y.z.dmg** from [Releases](../../releases) and open it.
+2. In the window that appears, drag **Weft** onto the **Applications** folder.
 3. Open Weft and grant **Full Disk Access** when it asks: System Settings → Privacy & Security → Full Disk Access → turn on Weft. Messages stores its history in a protected folder, so macOS requires this before Weft can read it.
 4. Pick the conversation to sort.
 5. Open **Settings** (gear icon) and choose the AI under **Sorting**. Click **Test** to make sure it works.
