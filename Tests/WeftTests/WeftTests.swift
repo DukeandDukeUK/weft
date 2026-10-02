@@ -309,4 +309,25 @@ final class WeftTests: XCTestCase {
         XCTAssertFalse(one.matches(two))
         XCTAssertTrue(one.matches(again))
     }
+
+    // Already-sorted conversations get consent once, at update, for the AI
+    // selected then — not for whichever AI they're opened with later.
+    func testLegacyConsentOnlyAtUpdate() throws {
+        let d = UserDefaults.standard
+        d.removeObject(forKey: "weft.legacyConsentMigrated")
+        let settings = AppSettings.shared
+        settings.provider = .codex
+        let chat: Int64 = 1_001
+        let before = settings.followedChats
+        settings.followedChats = before + [chat]
+        defer { settings.followedChats = before }
+        try SegmentationCache.save(CachedAnalysis(messageCount: 1, newestRowId: 1, generatedAt: Date(),
+            topics: [Topic(id: UUID(), title: "A", summary: "", messageIds: [1])], loops: []), chatId: chat)
+        settings.migrateLegacyConsentOnce()
+        XCTAssertTrue(settings.hasConsent(chat, for: .codex))
+        XCTAssertFalse(settings.hasConsent(chat, for: .claude), "a different AI must ask")
+        settings.provider = .claude
+        settings.migrateLegacyConsentOnce()                 // runs only once
+        XCTAssertFalse(settings.hasConsent(chat, for: .claude))
+    }
 }

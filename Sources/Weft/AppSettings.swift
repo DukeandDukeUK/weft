@@ -84,11 +84,18 @@ final class AppSettings {
         defaults.set(consents, forKey: Keys.consents)
     }
 
-    /// Before consent existed, sorted conversations were already being sent
-    /// to the AI in use; treat that as OK'd, once.
-    func grantLegacyConsentIfNeeded(_ chat: Int64) {
-        guard consents[String(chat)] == nil else { return }
-        grantConsent(chat)
+    /// One time only, on the first launch of a version with consent:
+    /// conversations that were already sorted were being sent to the AI
+    /// selected now, so that one (only) counts as OK'd. Opening any of
+    /// them later with a different AI asks.
+    func migrateLegacyConsentOnce() {
+        let key = "weft.legacyConsentMigrated"
+        guard !defaults.bool(forKey: key) else { return }
+        defaults.set(true, forKey: key)
+        guard provider != nil else { return }
+        for chat in followedChats where consents[String(chat)] == nil && SegmentationCache.load(chatId: chat) != nil {
+            grantConsent(chat)
+        }
     }
     /// Notifications say "New message" / "Follow-up reminder" instead of
     /// showing the text (it can appear on the lock screen).

@@ -175,6 +175,7 @@ final class WeftViewModel {
     static let noAIMessage = "No AI is set up to sort messages yet. Open Settings (gear icon) and pick one."
 
     func startup() async {
+        settings.migrateLegacyConsentOnce()
         if let saved = UserDefaults.standard.dictionary(forKey: "weft.drafts") as? [String: String] {
             drafts = Dictionary(uniqueKeysWithValues: saved.compactMap { k, v in Int64(k).map { ($0, v) } })
         }
@@ -270,7 +271,6 @@ final class WeftViewModel {
             if let cached = SegmentationCache.load(chatId: chat.id), !cached.topics.isEmpty {
                 topics = cached.topics
                 loops = cached.loops
-                settings.grantLegacyConsentIfNeeded(chat.id)
                 let filed = Set(cached.topics.flatMap(\.messageIds))
                 showProvisionally(messages.filter { $0.id > cached.newestRowId && !filed.contains($0.id) })
                 if !pendingMessageIDs.isEmpty { scheduleAutoSort(after: 0) }
@@ -372,8 +372,8 @@ final class WeftViewModel {
         defer { isAnalyzing = false }
         let mySession = session
         let snapshot = messages
-        guard let client = settings.makeClient() else {
-            notice = Self.noAIMessage
+        guard let client = clientForUpload() else {
+            if settings.provider == nil { notice = Self.noAIMessage }
             return
         }
         do {
@@ -514,7 +514,7 @@ final class WeftViewModel {
 
     /// "Retry" after the follow-up check failed.
     func retryFollowUps() async {
-        guard let myChat = settings.selectedChatRowID, !isAnalyzing, uploadAllowed(), let client = settings.makeClient() else { return }
+        guard let myChat = settings.selectedChatRowID, !isAnalyzing, let client = clientForUpload() else { return }
         isAnalyzing = true
         defer { isAnalyzing = false }
         let mySession = session
@@ -551,6 +551,13 @@ final class WeftViewModel {
                 ?? ChatInfo(id: chat, participants: settings.selectedHandleId, messageCount: messages.count, lastDate: messages.last?.date, lastSnippet: nil)
         }
         return false
+    }
+
+    /// The only way to get an AI client for calls that carry your messages:
+    /// no consent for this conversation and destination, no client.
+    private func clientForUpload() -> LLMClient? {
+        guard uploadAllowed() else { return nil }
+        return settings.makeClient()
     }
 
     /// Consent given: remember it (for this destination) and start.
@@ -670,7 +677,7 @@ final class WeftViewModel {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 continue
             }
-            guard uploadAllowed(), var client = settings.makeClient() else { return }
+            guard var client = clientForUpload() else { return }
             client.effort = "low"
 
             // Oldest unsorted messages first, so each chunk can see (and
@@ -766,7 +773,7 @@ final class WeftViewModel {
         let chat = settings.selectedChatRowID
         let mySession = session
         let pending = loops.filter { $0.status == .open && $0.needsLaterCheck == true }
-        guard !pending.isEmpty, uploadAllowed(), var client = settings.makeClient() else { return }
+        guard !pending.isEmpty, var client = clientForUpload() else { return }
         client.effort = "low"
         let earliest = pending.compactMap(\.sourceMessageId).min() ?? 0
         let later = messages.filter { $0.id > earliest }
@@ -1045,8 +1052,8 @@ final class WeftViewModel {
         }
 
         // Filing is a simple job: low reasoning keeps it to a few seconds.
-        guard var client = settings.makeClient() else {
-            notice = Self.noAIMessage
+        guard var client = clientForUpload() else {
+            if settings.provider == nil { notice = Self.noAIMessage }
             return
         }
         client.effort = "low"
