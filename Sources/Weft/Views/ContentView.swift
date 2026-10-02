@@ -107,7 +107,7 @@ struct FirstSortView: View {
         let firstPart = TopicSegmenter.buildTranscript(messages: viewModel.messages, maxTotalChars: limit).messages.count
         let total = viewModel.messages.count
         VStack(alignment: .leading, spacing: 14) {
-            Label("Sort this conversation?", systemImage: "square.stack.3d.up")
+            Label(viewModel.topics.isEmpty ? "Sort this conversation?" : "Use this AI for this conversation?", systemImage: "square.stack.3d.up")
                 .font(.title2.bold())
             Text(ContactNames.shared.display(chat.participants)).font(.headline)
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
@@ -121,9 +121,11 @@ struct FirstSortView: View {
                 }
                 GridRow {
                     Text("How much").foregroundStyle(.secondary)
-                    Text(firstPart >= total
-                         ? "All \(total) messages"
-                         : "The newest \(firstPart) of \(total) messages" + (settings.sortOlderHistory ? ", then the older ones in the background" : ""))
+                    Text(!viewModel.topics.isEmpty
+                         ? "New messages as they arrive" + (settings.sortOlderHistory ? ", plus any older history not yet sorted" : "")
+                         : (firstPart >= total
+                            ? "All \(total) messages"
+                            : "The newest \(firstPart) of \(total) messages" + (settings.sortOlderHistory ? ", then the older ones in the background" : "")))
                 }
             }
             Text("After this, only new messages are sent, a few at a time, as they arrive.")

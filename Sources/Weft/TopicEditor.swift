@@ -56,6 +56,32 @@ enum TopicEditor {
         return (rest + [new], new.id)
     }
 
+    /// Undo/Redo without losing later work: go back to `target`, but keep
+    /// any message that was filed after the edit (present in `current`,
+    /// absent from `applied`) in the topic it's in now.
+    static func rebase(target: [Topic], applied: [Topic], current: [Topic]) -> [Topic] {
+        let appliedIDs = Set(applied.flatMap(\.messageIds))
+        let later = Set(current.flatMap(\.messageIds)).subtracting(appliedIDs)
+        guard !later.isEmpty else { return target }
+        var result = target.map { t -> Topic in
+            var t = t
+            t.messageIds.removeAll { later.contains($0) }
+            return t
+        }
+        for t in current {
+            let extra = t.messageIds.filter { later.contains($0) }
+            guard !extra.isEmpty else { continue }
+            if let i = result.firstIndex(where: { $0.id == t.id }) {
+                result[i].messageIds = (result[i].messageIds + extra).sorted()
+            } else {
+                var kept = t
+                kept.messageIds = extra
+                result.append(kept)
+            }
+        }
+        return result.filter { !$0.messageIds.isEmpty }
+    }
+
     /// Split a topic: this message and everything after it (in that topic)
     /// become a new topic.
     static func split(_ topics: [Topic], _ id: UUID, from messageId: Int64, newTitle: String) -> (topics: [Topic], newID: UUID?) {

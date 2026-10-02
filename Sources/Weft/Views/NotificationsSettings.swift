@@ -32,6 +32,11 @@ struct NotificationOptions: View {
             .help("Play this sound")
             .disabled(!settings.notifyBanners || settings.notifySound == "none")
         }
+        Toggle("Hide message text in notifications", isOn: $settings.notifyHidePreviews)
+            .disabled(!settings.notifyBanners)
+        Text("Notifications and follow-up reminders show message text, and macOS can show them on the lock screen. Turn this on to show only “New message” / “Follow-up reminder”, or choose “Show previews: When Unlocked” in Weft's notification settings.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
         Toggle("Show the number of new messages on Weft's Dock icon", isOn: $settings.dockBadge)
         HStack {
             Button("Send test notification") {

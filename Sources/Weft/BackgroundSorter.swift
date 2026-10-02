@@ -67,7 +67,9 @@ final class BackgroundSorter {
 
     private func fileNew(chat: Int64, settings: AppSettings, openChat: @MainActor () -> Int64?) async {
         // Only conversations that have been sorted once (opened in Weft).
-        guard var saved = SegmentationCache.load(chatId: chat), !saved.topics.isEmpty,
+        // Only with your OK for this conversation and this destination.
+        guard settings.hasConsent(chat),
+              var saved = SegmentationCache.load(chatId: chat), !saved.topics.isEmpty,
               var client = settings.makeClient() else { return }
         let reader = ChatDBReader.shared
         guard var fresh = try? await reader.fetchMessages(chatRowID: chat, after: saved.newestRowId),
@@ -107,7 +109,7 @@ final class BackgroundSorter {
         topics.sort { ($0.messageIds.max() ?? 0) > ($1.messageIds.max() ?? 0) }
 
         var loops = saved.loops
-        for loop in result.newLoops where !loops.contains(where: { $0.title.caseInsensitiveCompare(loop.title) == .orderedSame }) {
+        for loop in result.newLoops where !loops.contains(where: { $0.matches(loop) }) {
             loops.append(loop)
         }
         let resolved = Set(result.resolvedLoopIDs)

@@ -270,16 +270,13 @@ final class WeftViewModel {
             if let cached = SegmentationCache.load(chatId: chat.id), !cached.topics.isEmpty {
                 topics = cached.topics
                 loops = cached.loops
+                settings.grantLegacyConsentIfNeeded(chat.id)
                 let filed = Set(cached.topics.flatMap(\.messageIds))
                 showProvisionally(messages.filter { $0.id > cached.newestRowId && !filed.contains($0.id) })
                 if !pendingMessageIDs.isEmpty { scheduleAutoSort(after: 0) }
             } else if !messages.isEmpty {
-                // First time for this conversation: ask before uploading it.
-                if settings.consentedChats.contains(chat.id) {
-                    scheduleAutoSort(after: 0)
-                } else {
-                    firstSortRequest = chat
-                }
+                // First time: the consent check (at the AI call) asks first.
+                scheduleAutoSort(after: 0)
             }
             scrollToken += 1
             startPolling()
@@ -370,7 +367,7 @@ final class WeftViewModel {
     /// conversation has no saved topics; otherwise new messages are filed
     /// incrementally by `fileNewMessages()`.
     func analyze() async {
-        guard !messages.isEmpty, let myChat = settings.selectedChatRowID, !isAnalyzing else { return }
+        guard !messages.isEmpty, let myChat = settings.selectedChatRowID, !isAnalyzing, uploadAllowed() else { return }
         isAnalyzing = true
         defer { isAnalyzing = false }
         let mySession = session
@@ -517,7 +514,7 @@ final class WeftViewModel {
 
     /// "Retry" after the follow-up check failed.
     func retryFollowUps() async {
-        guard let myChat = settings.selectedChatRowID, !isAnalyzing, let client = settings.makeClient() else { return }
+        guard let myChat = settings.selectedChatRowID, !isAnalyzing, uploadAllowed(), let client = settings.makeClient() else { return }
         isAnalyzing = true
         defer { isAnalyzing = false }
         let mySession = session
@@ -538,20 +535,42 @@ final class WeftViewModel {
         }
     }
 
-    /// First-sort consent given: remember it and start.
+    /// Conversations you said "Not Now" to (this session): no nagging.
+    private var postponed: Set<Int64> = []
+
+    /// THE consent check — every AI call for the open conversation goes
+    /// through here. Without your OK for this conversation AND this
+    /// destination (local vs. a cloud AI), nothing is sent: Weft asks
+    /// instead (unless you just said "Not Now").
+    func uploadAllowed() -> Bool {
+        guard let chat = settings.selectedChatRowID else { return false }
+        if settings.hasConsent(chat) { return true }
+        if !postponed.contains(chat), firstSortRequest == nil {
+            // Ask even if the conversation list is momentarily out of date.
+            firstSortRequest = selectedChat
+                ?? ChatInfo(id: chat, participants: settings.selectedHandleId, messageCount: messages.count, lastDate: messages.last?.date, lastSnippet: nil)
+        }
+        return false
+    }
+
+    /// Consent given: remember it (for this destination) and start.
     func approveFirstSort() {
         guard let chat = firstSortRequest else { return }
-        settings.consentedChats.insert(chat.id)
+        settings.grantConsent(chat.id)
+        postponed.remove(chat.id)
         firstSortRequest = nil
         notice = nil
         scheduleAutoSort(after: 0)
+        startHistoryBackfill()
     }
 
-    /// "Not now" on the first-sort question.
+    /// "Not now": nothing is sent until you choose Sort.
     func postponeFirstSort() {
         guard let chat = firstSortRequest else { return }
+        postponed.insert(chat.id)
         firstSortRequest = nil
-        showNotice("This conversation isn't sorted yet.", action: "Sort…") { [weak self] in
+        showNotice("This conversation isn't being sorted.", action: "Sort…") { [weak self] in
+            self?.postponed.remove(chat.id)
             self?.firstSortRequest = chat
         }
     }
@@ -575,7 +594,7 @@ final class WeftViewModel {
         let after = change(before)
         guard after != before else { return }
         applyEdit(after, chat: chat)
-        registerEditUndo(actionName, undoManager: undoManager, chat: chat, restore: before, redo: after)
+        registerEditUndo(actionName, undoManager: undoManager, chat: chat, target: before, applied: topics)
     }
 
     private func applyEdit(_ newTopics: [Topic], chat: Int64) {
@@ -587,14 +606,19 @@ final class WeftViewModel {
         saveCache(chat: chat, filedThrough: Self.checkpoint(messages: messages, pending: pendingMessageIDs))
     }
 
-    private func registerEditUndo(_ name: String, undoManager: UndoManager?, chat: Int64, restore: [Topic], redo: [Topic]) {
+    /// - Parameters:
+    ///   - target: what Undo goes back to.
+    ///   - applied: the topics right after the edit — anything filed later
+    ///     than this is kept where it is when undoing.
+    private func registerEditUndo(_ name: String, undoManager: UndoManager?, chat: Int64, target: [Topic], applied: [Topic]) {
         guard let undoManager else { return }
         undoManager.registerUndo(withTarget: self) { vm in
             MainActor.assumeIsolated {
                 // Only undo into the conversation the edit was made in.
                 guard vm.settings.selectedChatRowID == chat else { return }
-                vm.applyEdit(restore, chat: chat)
-                vm.registerEditUndo(name, undoManager: undoManager, chat: chat, restore: redo, redo: restore)
+                let beforeUndo = vm.topics
+                vm.applyEdit(TopicEditor.rebase(target: target, applied: applied, current: beforeUndo), chat: chat)
+                vm.registerEditUndo(name, undoManager: undoManager, chat: chat, target: beforeUndo, applied: vm.topics)
             }
         }
         undoManager.setActionName(name)
@@ -646,7 +670,7 @@ final class WeftViewModel {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 continue
             }
-            guard var client = settings.makeClient() else { return }
+            guard uploadAllowed(), var client = settings.makeClient() else { return }
             client.effort = "low"
 
             // Oldest unsorted messages first, so each chunk can see (and
@@ -726,7 +750,7 @@ final class WeftViewModel {
                 loops[i].status = .resolved
                 loops[i].needsLaterCheck = nil
             }
-            for var loop in result.newLoops where !loops.contains(where: { $0.title.caseInsensitiveCompare(loop.title) == .orderedSame }) {
+            for var loop in result.newLoops where !loops.contains(where: { $0.matches(loop) }) {
                 loop.needsLaterCheck = true
                 loops.append(loop)
             }
@@ -742,7 +766,7 @@ final class WeftViewModel {
         let chat = settings.selectedChatRowID
         let mySession = session
         let pending = loops.filter { $0.status == .open && $0.needsLaterCheck == true }
-        guard !pending.isEmpty, var client = settings.makeClient() else { return }
+        guard !pending.isEmpty, uploadAllowed(), var client = settings.makeClient() else { return }
         client.effort = "low"
         let earliest = pending.compactMap(\.sourceMessageId).min() ?? 0
         let later = messages.filter { $0.id > earliest }
@@ -988,7 +1012,7 @@ final class WeftViewModel {
     /// Ask Claude where the pending messages belong, given the existing topics.
     private func fileNewMessages() async {
         let allPending = messages.filter { pendingMessageIDs.contains($0.id) }
-        guard !allPending.isEmpty, let myChat = settings.selectedChatRowID else { return }
+        guard !allPending.isEmpty, let myChat = settings.selectedChatRowID, uploadAllowed() else { return }
         // Oldest first, and no more than this AI can take in one call —
         // the rest wait for the next pass.
         let batch = Self.batch(allPending, local: settings.provider?.isLocal ?? false)
@@ -1140,9 +1164,7 @@ final class WeftViewModel {
     func mergeLoops(_ detected: [OpenLoop]) -> [OpenLoop] {
         var merged = loops // keep resolved/dismissed history
         for loop in detected {
-            let exists = merged.contains {
-                $0.title.caseInsensitiveCompare(loop.title) == .orderedSame
-            }
+            let exists = merged.contains { $0.matches(loop) }
             if !exists { merged.append(loop) }
         }
         return merged

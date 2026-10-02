@@ -77,12 +77,13 @@ Based on list prices per million tokens (input / output): Sonnet 5.5 $2 / $10, H
 - To sort, Weft sends the text of the conversations you added (and who sent each message) to the AI you chose, and nothing else. Each added conversation uses a little of your AI plan as new messages arrive. With Ollama or LM Studio, message processing stays on your Mac.
 - Weft has no account, no server, no analytics and no tracking. Topics and follow-ups are saved in `~/Library/Application Support/Weft/`.
 - At launch Weft contacts GitHub to check for updates and to read its model recommendations (`recommendations.json` in this project). GitHub sees your internet address; no messages or personal data are sent.
+- Notifications and follow-up reminders show message text, which macOS can show on the lock screen. Turn on **Hide message text in notifications** (Settings → Notifications) to show only "New message".
 - Contacts access is optional. Weft shows names next to numbers, and the names are also part of the text sent to the AI you chose, so it knows who said what. Without Contacts access, phone numbers and email addresses are sent instead. With Ollama or LM Studio, message processing stays on your Mac.
 
 ## Limitations
 
 - Mac only. iOS doesn't let apps read your messages, and Android only lets an app do so if it is your default texting app.
-- Photos and attachments show as "[attachment]".
+- Photos and files that are still in iCloud show as "not downloaded" until Messages downloads them.
 
 ## Building from source
 

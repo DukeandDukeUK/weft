@@ -56,7 +56,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let sender = newest.senderName.isEmpty ? conversationName : newest.senderName
         content.title = sender
         if sender != conversationName { content.subtitle = conversationName }
-        content.body = incoming.count == 1 ? newest.text : "\(newest.text)\n(+\(incoming.count - 1) more)"
+        content.body = settings.notifyHidePreviews
+            ? (incoming.count == 1 ? "New message" : "\(incoming.count) new messages")
+            : (incoming.count == 1 ? newest.text : "\(newest.text)\n(+\(incoming.count - 1) more)")
         content.sound = Self.sound(named: settings.notifySound)
         content.threadIdentifier = "chat-\(chat)"
         content.userInfo = ["chat": chat]
@@ -65,32 +67,59 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         )
     }
 
-    /// Reminders for follow-ups: one per open follow-up with a due date or
-    /// snooze in the future. Replaces this conversation's earlier ones.
+    /// When a follow-up's reminder should fire: the snooze if it's in the
+    /// future (a snooze always wins, even over an earlier due date),
+    /// otherwise the due date if it's in the future.
+    static func reminderDate(for loop: OpenLoop, now: Date = Date()) -> Date? {
+        guard loop.status == .open else { return nil }
+        if let snooze = loop.snoozedUntil, snooze > now { return snooze }
+        if let due = loop.dueDate, due > now { return due }
+        return nil
+    }
+
+    /// Bumped on every sync; an older sync that finishes late does nothing.
+    private var reminderGeneration: [Int64: Int] = [:]
+
+    /// Reminders for follow-ups: one per open follow-up with a reminder
+    /// date. Replaces this conversation's earlier ones. Removal and adding
+    /// happen together, and only for the newest sync, so a slow older sync
+    /// can't delete the reminders a newer one just added.
     func syncReminders(loops: [OpenLoop], chat: Int64, conversationName: String, settings: AppSettings) {
         guard let center else { return }
+        let generation = (reminderGeneration[chat] ?? 0) + 1
+        reminderGeneration[chat] = generation
         let prefix = "weft-loop-\(chat)-"
-        center.getPendingNotificationRequests { pending in
-            let stale = pending.map(\.identifier).filter { $0.hasPrefix(prefix) }
-            center.removePendingNotificationRequests(withIdentifiers: stale)
+        var requests: [UNNotificationRequest] = []
+        if settings.notifyBanners {
+            for loop in loops {
+                guard let when = Self.reminderDate(for: loop) else { continue }
+                let content = UNMutableNotificationContent()
+                let isDue = loop.dueDate == when
+                if settings.notifyHidePreviews {
+                    content.title = isDue ? "A follow-up is due" : "Follow-up reminder"
+                    content.body = conversationName
+                } else {
+                    content.title = isDue ? "Due: \(loop.title)" : "Reminder: \(loop.title)"
+                    content.subtitle = conversationName
+                    content.body = loop.detail
+                }
+                content.sound = Self.sound(named: settings.notifySound)
+                content.userInfo = ["chat": chat, "loop": loop.id.uuidString]
+                let parts = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: when)
+                requests.append(UNNotificationRequest(
+                    identifier: prefix + loop.id.uuidString,
+                    content: content,
+                    trigger: UNCalendarNotificationTrigger(dateMatching: parts, repeats: false)
+                ))
+            }
         }
-        guard settings.notifyBanners else { return }
-        let now = Date()
-        for loop in loops where loop.status == .open {
-            let when = [loop.snoozedUntil, loop.dueDate].compactMap { $0 }.filter { $0 > now }.min()
-            guard let when else { continue }
-            let content = UNMutableNotificationContent()
-            content.title = loop.isOverdue(at: when) || loop.dueDate == when ? "Due: \(loop.title)" : "Reminder: \(loop.title)"
-            content.subtitle = conversationName
-            content.body = loop.detail
-            content.sound = Self.sound(named: settings.notifySound)
-            content.userInfo = ["chat": chat, "loop": loop.id.uuidString]
-            let parts = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: when)
-            center.add(UNNotificationRequest(
-                identifier: prefix + loop.id.uuidString,
-                content: content,
-                trigger: UNCalendarNotificationTrigger(dateMatching: parts, repeats: false)
-            ))
+        center.getPendingNotificationRequests { pending in
+            let old = pending.map(\.identifier).filter { $0.hasPrefix(prefix) }
+            Task { @MainActor in
+                guard self.reminderGeneration[chat] == generation else { return }   // a newer sync owns it
+                center.removePendingNotificationRequests(withIdentifiers: old)
+                for request in requests { center.add(request) }
+            }
         }
     }
 

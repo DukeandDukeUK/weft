@@ -60,9 +60,39 @@ final class AppSettings {
         didSet { defaults.set(recentOnlyChats.map(String.init), forKey: Keys.recentOnly) }
     }
     /// Conversations you've OK'd sending to the AI (first-sort question).
+    /// Kept for older versions; the real check is per destination below.
     var consentedChats: Set<Int64> {
         didSet { defaults.set(consentedChats.map(String.init), forKey: Keys.consented) }
     }
+    /// Which destinations you've OK'd for each conversation ("local", or a
+    /// cloud provider). OK'ing a local model doesn't cover a cloud AI.
+    private(set) var consents: [String: [String]]
+
+    static func destination(_ p: Provider) -> String { p.isLocal ? "local" : p.rawValue }
+
+    func hasConsent(_ chat: Int64, for provider: Provider? = nil) -> Bool {
+        guard let p = provider ?? self.provider else { return false }
+        return consents[String(chat)]?.contains(Self.destination(p)) ?? false
+    }
+
+    func grantConsent(_ chat: Int64, for provider: Provider? = nil) {
+        guard let p = provider ?? self.provider else { return }
+        var list = consents[String(chat)] ?? []
+        if !list.contains(Self.destination(p)) { list.append(Self.destination(p)) }
+        consents[String(chat)] = list
+        consentedChats.insert(chat)
+        defaults.set(consents, forKey: Keys.consents)
+    }
+
+    /// Before consent existed, sorted conversations were already being sent
+    /// to the AI in use; treat that as OK'd, once.
+    func grantLegacyConsentIfNeeded(_ chat: Int64) {
+        guard consents[String(chat)] == nil else { return }
+        grantConsent(chat)
+    }
+    /// Notifications say "New message" / "Follow-up reminder" instead of
+    /// showing the text (it can appear on the lock screen).
+    var notifyHidePreviews: Bool { didSet { defaults.set(notifyHidePreviews, forKey: Keys.hidePreviews) } }
     /// Red count on Weft's Dock icon.
     var dockBadge: Bool { didSet { defaults.set(dockBadge, forKey: Keys.dockBadge) } }
     /// The notifications step of first-time setup has been shown.
@@ -91,8 +121,10 @@ final class AppSettings {
         static let notifyBanners = "weft.notifyBanners"
         static let notifySound = "weft.notifySound"
         static let dockBadge = "weft.dockBadge"
+        static let hidePreviews = "weft.notifyHidePreviews"
         static let codexFast = "weft.codexFast"
         static let consented = "weft.consentedChats"
+        static let consents = "weft.consents"
         static let paused = "weft.pausedChats"
         static let recentOnly = "weft.recentOnlyChats"
         static let sortOlderHistory = "weft.sortOlderHistory"
@@ -120,8 +152,10 @@ final class AppSettings {
         self.notifyBanners = d.object(forKey: Keys.notifyBanners) as? Bool ?? true
         self.notifySound = d.string(forKey: Keys.notifySound) ?? "default"
         self.dockBadge = d.object(forKey: Keys.dockBadge) as? Bool ?? true
+        self.notifyHidePreviews = d.bool(forKey: Keys.hidePreviews)
         self.codexFast = d.bool(forKey: Keys.codexFast)
         self.consentedChats = Set((d.stringArray(forKey: Keys.consented) ?? []).compactMap(Int64.init))
+        self.consents = (d.dictionary(forKey: Keys.consents) as? [String: [String]]) ?? [:]
         self.pausedChats = Set((d.stringArray(forKey: Keys.paused) ?? []).compactMap(Int64.init))
         self.recentOnlyChats = Set((d.stringArray(forKey: Keys.recentOnly) ?? []).compactMap(Int64.init))
         self.sortOlderHistory = d.object(forKey: Keys.sortOlderHistory) as? Bool ?? true

@@ -43,6 +43,7 @@ final class WeftTests: XCTestCase {
         script(delay: 300_000_000)
         let vm = WeftViewModel()
         vm.settings.selectedChatRowID = 101
+        vm.settings.grantConsent(101)
         vm.messages = [msg(1), msg(2)]
         let sort = Task { await vm.analyze() }
         try await Task.sleep(nanoseconds: 50_000_000)
@@ -80,6 +81,7 @@ final class WeftTests: XCTestCase {
         script(followUps: "[]", later: #"{"resolved":[0]}"#)
         let vm = WeftViewModel()
         vm.settings.selectedChatRowID = 303
+        vm.settings.grantConsent(303)
         vm.messages = (1...10).map { msg(Int64($0)) }
         let open = OpenLoop(id: UUID(), title: "Book dentist", detail: "", status: .open, createdDate: Date(), sourceMessageId: 2)
         let dismissed = OpenLoop(id: UUID(), title: "Old idea", detail: "", status: .dismissed, createdDate: Date(), sourceMessageId: 3)
@@ -136,15 +138,14 @@ final class WeftTests: XCTestCase {
         vm.drafts = [:]
     }
 
-    // First sort waits for consent, and consent is remembered.
+    // First sort waits for consent, and consent is remembered (per destination).
     func testFirstSortConsent() {
         let vm = WeftViewModel()
         let chat = ChatInfo(id: 404, participants: "x", messageCount: 1, lastDate: nil, lastSnippet: nil)
         vm.firstSortRequest = chat
         vm.approveFirstSort()
         XCTAssertNil(vm.firstSortRequest)
-        XCTAssertTrue(vm.settings.consentedChats.contains(404))
-        vm.settings.consentedChats.remove(404)
+        XCTAssertTrue(vm.settings.hasConsent(404, for: .claude))
     }
 
     // MARK: - 0.2.0 features
@@ -224,5 +225,88 @@ final class WeftTests: XCTestCase {
         try await Task.sleep(nanoseconds: 300_000_000)
         XCTAssertEqual(calls, 0, "a paused conversation was sent to the AI")
         XCTAssertEqual(vm.pendingMessageIDs, [2], "the new message should still be waiting")
+    }
+
+    // MARK: - 0.2.1 fixes
+
+    // "Not Now" really means nothing is sent — even when new messages arrive.
+    func testNotNowBlocksEveryAICall() async throws {
+        var calls = 0
+        LLMClient.testResponder = { _, _ in calls += 1; return "[]" }
+        let vm = WeftViewModel()
+        vm.settings.provider = .claude
+        vm.chats = [ChatInfo(id: 707, participants: "x", messageCount: 2, lastDate: nil, lastSnippet: nil)]
+        vm.settings.selectedChatRowID = 707                 // never OK'd
+        vm.messages = [msg(1), msg(2)]
+        await vm.analyze()                                  // would be the first sort
+        XCTAssertEqual(calls, 0)
+        XCTAssertNotNil(vm.firstSortRequest, "should ask instead")
+        vm.firstSortRequest = ChatInfo(id: 707, participants: "x", messageCount: 2, lastDate: nil, lastSnippet: nil)
+        vm.postponeFirstSort()
+        vm.pendingMessageIDs = [2]                          // a new message arrives
+        vm.retryFiling()
+        await vm.analyze()
+        await vm.retryFollowUps()
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(calls, 0, "something was sent after Not Now")
+        XCTAssertNil(vm.firstSortRequest, "Not Now shouldn't nag on every message")
+    }
+
+    // OK'ing a local model doesn't cover a cloud AI.
+    func testSwitchingFromLocalToCloudAsksAgain() async {
+        var calls = 0
+        LLMClient.testResponder = { _, _ in calls += 1; return "[]" }
+        let vm = WeftViewModel()
+        vm.chats = [ChatInfo(id: 808, participants: "x", messageCount: 1, lastDate: nil, lastSnippet: nil)]
+        vm.settings.selectedChatRowID = 808
+        vm.settings.grantConsent(808, for: .ollama)
+        vm.settings.provider = .claude
+        vm.messages = [msg(1)]
+        await vm.analyze()
+        XCTAssertEqual(calls, 0)
+        XCTAssertNotNil(vm.firstSortRequest)
+        XCTAssertTrue(vm.settings.hasConsent(808, for: .lmstudio), "another local model is the same destination")
+    }
+
+    // A snooze always wins over an earlier due date; done items never fire.
+    func testReminderTime() {
+        let now = Date()
+        var loop = OpenLoop(id: UUID(), title: "x", detail: "", status: .open, createdDate: now)
+        loop.dueDate = now.addingTimeInterval(3600)
+        loop.snoozedUntil = now.addingTimeInterval(7200)
+        XCTAssertEqual(Notifier.reminderDate(for: loop, now: now), loop.snoozedUntil)
+        loop.snoozedUntil = nil
+        XCTAssertEqual(Notifier.reminderDate(for: loop, now: now), loop.dueDate)
+        loop.status = .resolved
+        XCTAssertNil(Notifier.reminderDate(for: loop, now: now))
+    }
+
+    // Undo keeps messages that were filed after the edit.
+    func testUndoKeepsLaterMessages() {
+        let vm = WeftViewModel()
+        vm.settings.selectedChatRowID = 909
+        let a = Topic(id: UUID(), title: "Flight", summary: "", messageIds: [1, 2])
+        let b = Topic(id: UUID(), title: "Dentist", summary: "", messageIds: [3])
+        vm.topics = [a, b]
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        undo.beginUndoGrouping()
+        vm.editTopics("Merge Topics", undoManager: undo) { TopicEditor.merge($0, b.id, into: a.id) }
+        undo.endUndoGrouping()
+        // A new message is filed into the merged topic after the edit.
+        if let i = vm.topics.firstIndex(where: { $0.id == a.id }) { vm.topics[i].messageIds.append(4) }
+        undo.undo()
+        XCTAssertEqual(Set(vm.topics.map(\.id)), [a.id, b.id], "merge undone")
+        XCTAssertTrue(vm.topics.flatMap(\.messageIds).contains(4), "message filed after the edit was erased")
+        XCTAssertEqual(vm.topics.first { $0.id == a.id }?.messageIds, [1, 2, 4])
+    }
+
+    // Two follow-ups with the same title from different messages are both kept.
+    func testFollowUpsWithSameTitleFromDifferentMessages() {
+        let one = OpenLoop(id: UUID(), title: "Call back", detail: "", status: .open, createdDate: Date(), sourceMessageId: 10)
+        let two = OpenLoop(id: UUID(), title: "call back", detail: "", status: .open, createdDate: Date(), sourceMessageId: 20)
+        let again = OpenLoop(id: UUID(), title: "Call back", detail: "", status: .open, createdDate: Date(), sourceMessageId: 10)
+        XCTAssertFalse(one.matches(two))
+        XCTAssertTrue(one.matches(again))
     }
 }

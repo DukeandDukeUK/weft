@@ -159,6 +159,13 @@ struct OpenLoop: Identifiable, Sendable, Hashable, Codable {
     /// Hidden from the active list until then (a reminder fires then).
     var snoozedUntil: Date? = nil
 
+    /// Same follow-up: same title AND from the same message (when known).
+    func matches(_ other: OpenLoop) -> Bool {
+        guard title.caseInsensitiveCompare(other.title) == .orderedSame else { return false }
+        guard let a = sourceMessageId, let b = other.sourceMessageId else { return true }
+        return a == b
+    }
+
     func isSnoozed(at now: Date = Date()) -> Bool { (snoozedUntil ?? .distantPast) > now }
     func isOverdue(at now: Date = Date()) -> Bool {
         guard status == .open, let dueDate else { return false }
