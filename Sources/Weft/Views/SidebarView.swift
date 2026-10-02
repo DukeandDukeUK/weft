@@ -122,6 +122,8 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
+        // Wide enough that conversation names and thread titles fit.
+        .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 420)
         .navigationTitle(viewModel.selectedChat.map { chatTitle($0) } ?? "Weft")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {

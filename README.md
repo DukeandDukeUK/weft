@@ -1,16 +1,21 @@
 # Weft
 
-**Turn one endless Messages conversation into topic threads.**
+**Turn endless Messages conversations into topic threads.**
 
-If you text an AI assistant (or anyone) about everything in one long conversation, it turns into a scroll of mixed subjects: travel plans, a bill, a recipe, back to the travel plans. Weft reads that conversation on your Mac and sorts it into threads you can open, read and reply in, like separate email threads.
+If you text an AI assistant (or your boss, or the family group) about everything in one long conversation, it turns into a scroll of mixed subjects: travel plans, a bill, a recipe, back to the travel plans. Weft reads your conversations on your Mac and sorts each one into threads you can open, read and reply in, like separate email threads.
+
+![Weft showing a conversation sorted into threads](docs/screenshot-light.png)
 
 - **Threads, sorted automatically.** New messages are filed into the right thread a few seconds after they arrive, or a new thread is started.
+- **Several conversations.** Add as many as you like with **+**, drag them into your own order, and right-click to remove one. All of them stay sorted in the background; a dot shows which have new messages.
+- **Group chats.** Each message shows who sent it, and the sorting knows who said what. (Replying to group chats isn't supported yet — reply in Messages.)
 - **Reply inside a thread.** Your reply is sent through Messages as you. It starts with "Re: <thread> —", so the other side knows which subject you mean (you can turn this off).
 - **Open loops.** Weft keeps a list of requests that haven't been answered yet and promises that haven't been kept, and checks them off when they're done.
 - **Search** across the whole conversation.
-- **Reactions** (❤️ 👍 ✅ …) show on messages just like in Messages.
+- **Reactions** (❤️ 👍 ✅ …) show on messages just like in Messages, including several people's in a group — click them to see who reacted.
 - **Contact names** next to phone numbers, if you allow Contacts access.
 - **Automatic updates.** Weft checks for new versions and offers to install them (Weft → Check for Updates…).
+- **Light, Dark or Automatic** appearance (Settings → Appearance).
 
 Weft never changes your Messages history. It only reads it, and sends a message when you press Send.
 
@@ -25,8 +30,10 @@ Weft never changes your Messages history. It only reads it, and sends a message 
 1. Download the latest **Weft-x.y.z.dmg** from [Releases](../../releases) and open it.
 2. In the window that appears, drag **Weft** onto the **Applications** folder.
 3. Open Weft and grant **Full Disk Access** when it asks: System Settings → Privacy & Security → Full Disk Access → turn on Weft. Messages stores its history in a protected folder, so macOS requires this before Weft can read it.
-4. Pick the conversation to sort.
-5. Open **Settings** (gear icon) and choose the AI under **Sorting**. Click **Test** to make sure it works.
+4. Pick a conversation to sort. Add more any time with the **+** next to **Conversations**.
+5. Open **Settings** (gear icon, or Weft → Settings…) and choose the AI under **Sorting**. Click **Test** to make sure it works.
+
+![Weft in Dark mode](docs/screenshot-dark.png)
 
 The first time you send a reply from Weft, macOS asks whether Weft may control Messages. Click **Allow**.
 
@@ -52,7 +59,7 @@ Sorting uses a small amount of your plan's usage each time new messages arrive. 
 ## Privacy
 
 - Weft reads your Messages history **only on your Mac** and never changes it.
-- To sort, Weft sends the text of the conversation you picked to the AI you chose, and nothing else. With Ollama or LM Studio, nothing leaves your Mac.
+- To sort, Weft sends the text of the conversations you added (and who sent each message) to the AI you chose, and nothing else. Each added conversation uses a little of your AI plan as new messages arrive. With Ollama or LM Studio, nothing leaves your Mac.
 - Weft has no account, no server, no analytics and no tracking. Topics and open loops are saved in `~/Library/Application Support/Weft/`.
 - At launch Weft contacts GitHub to check for updates and to read its model recommendations (`recommendations.json` in this project). GitHub sees your internet address; no messages or personal data are sent.
 - Contacts access is optional and only used to show names next to numbers on your Mac.
@@ -60,7 +67,7 @@ Sorting uses a small amount of your plan's usage each time new messages arrive. 
 ## Limitations
 
 - Mac only. iOS doesn't let apps read your messages, and Android only lets an app do so if it is your default texting app.
-- Replies can be sent only in one-to-one conversations (not group chats).
+- Replies can be sent only in one-to-one conversations; group chats are read and sorted but not replied to yet.
 - Photos and attachments show as "[attachment]".
 
 ## Building from source
