@@ -15,10 +15,10 @@ struct OpenLoopDetector: Sendable {
     func detect(messages: [ChatMessage]) async throws -> [OpenLoop] {
         let (_, transcript) = TopicSegmenter.buildTranscript(messages: messages, maxTotalChars: client.transcriptCharLimit)
         let system = """
-            You are reviewing a chat transcript between a person ("You") and the other side ("Them" — often an AI assistant).
+            You are reviewing a chat transcript between a person ("You") and one or more others (each line is labeled with who sent it; often an AI assistant).
             Find OPEN LOOPS:
             (a) requests or questions from You with no confirmed resolution later in the transcript;
-            (b) promises, commitments, or "I'll follow up / I'll handle it" statements from Them with no confirmed completion.
+            (b) promises, commitments, or "I'll follow up / I'll handle it" statements from the others with no confirmed completion.
             Ignore anything clearly finished. When unsure whether something resolved, include it.
             Return ONLY a JSON array — no markdown fences, no commentary — of objects with keys:
             "title": short title, 6 words max

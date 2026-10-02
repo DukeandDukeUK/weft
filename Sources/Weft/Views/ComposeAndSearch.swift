@@ -17,13 +17,16 @@ struct ComposeView: View {
             // Grows up to 6 lines as you type; Enter sends, Option-Return
             // adds a new line (the standard Mac text-field behaviour).
             TextField(
-                viewModel.selectedTopic.map { "Reply in “\($0.title)”" } ?? "Message",
+                viewModel.isGroupChat
+                    ? "Replying to group chats isn't supported yet — reply in Messages"
+                    : (viewModel.selectedTopic.map { "Reply in “\($0.title)”" } ?? "Message"),
                 text: $draft,
                 axis: .vertical
             )
             .textFieldStyle(.plain)
             .font(.body)
             .lineLimit(1...6)
+            .disabled(viewModel.isGroupChat)
             .onSubmit(send)
             .padding(.vertical, 8)
             Button(action: send) {
@@ -75,7 +78,7 @@ struct SearchResultsView: View {
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
-                            Text(message.isFromMe ? "You" : "Them")
+                            Text(message.speaker)
                                 .font(.caption)
                                 .bold()
                                 .foregroundStyle(.secondary)

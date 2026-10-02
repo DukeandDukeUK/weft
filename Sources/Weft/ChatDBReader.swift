@@ -170,7 +170,10 @@ actor ChatDBReader {
 
     /// Full transcript of one conversation, oldest first (UI shows oldest at top).
     /// - Parameter after: when set, only messages with ROWID greater than this are returned (polling).
-    func fetchMessages(chatRowID: Int64, after: Int64? = nil) throws -> [ChatMessage] {
+    /// - Parameters:
+    ///   - upTo: when set, only messages with ROWID up to and including this.
+    ///   - newest: when set, only the newest N matching messages (still returned oldest first).
+    func fetchMessages(chatRowID: Int64, after: Int64? = nil, upTo: Int64? = nil, newest: Int? = nil) throws -> [ChatMessage] {
         var sql = """
             SELECT m.ROWID, m.text, m.attributedBody, m.is_from_me, m.date,
                    COALESCE(h.id, ''), m.cache_has_attachments, m.guid
@@ -183,11 +186,19 @@ actor ChatDBReader {
         // Skip tapbacks / reactions / threaded-reply metadata rows; they carry
         // associated_message_guid and would pollute the transcript.
         if after != nil { sql += " AND m.ROWID > ?" }
-        sql += " ORDER BY m.date ASC, m.ROWID ASC"
+        if upTo != nil { sql += " AND m.ROWID <= ?" }
+        if newest != nil {
+            sql += " ORDER BY m.date DESC, m.ROWID DESC LIMIT ?"
+        } else {
+            sql += " ORDER BY m.date ASC, m.ROWID ASC"
+        }
 
-        return try query(sql, bind: { stmt in
-            sqlite3_bind_int64(stmt, 1, chatRowID)
-            if let after { sqlite3_bind_int64(stmt, 2, after) }
+        let rows: [ChatMessage] = try query(sql, bind: { stmt in
+            var i: Int32 = 1
+            sqlite3_bind_int64(stmt, i, chatRowID); i += 1
+            if let after { sqlite3_bind_int64(stmt, i, after); i += 1 }
+            if let upTo { sqlite3_bind_int64(stmt, i, upTo); i += 1 }
+            if let newest { sqlite3_bind_int64(stmt, i, Int64(newest)) }
         }) { stmt in
             let rowID = columnInt64(stmt, 0)
             var text = columnString(stmt, 1)
@@ -207,6 +218,25 @@ actor ChatDBReader {
                 guid: columnString(stmt, 7) ?? ""
             )
         }
+        return newest != nil ? rows.reversed() : rows
+    }
+
+    /// Newest real message (not a reaction) in a conversation — for the
+    /// "new messages" dot on conversations you aren't looking at.
+    func latestMessageRowID(chatRowID: Int64) throws -> Int64 {
+        let sql = """
+            SELECT COALESCE(MAX(m.ROWID), 0)
+              FROM message m
+              JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+             WHERE cmj.chat_id = ? AND m.associated_message_guid IS NULL
+            """
+        return try query(sql, bind: { sqlite3_bind_int64($0, 1, chatRowID) }) { columnInt64($0, 0) }.first ?? 0
+    }
+
+    /// The last `limit` messages up to and including `upTo`, oldest first —
+    /// context for filing new messages in the background.
+    func fetchContext(chatRowID: Int64, upTo: Int64, limit: Int) throws -> [ChatMessage] {
+        try fetchMessages(chatRowID: chatRowID, upTo: upTo, newest: limit)
     }
 
     /// Reaction rows (adds and removals) in this conversation, oldest first.
@@ -214,9 +244,10 @@ actor ChatDBReader {
     func fetchReactions(chatRowID: Int64, after: Int64 = 0) throws -> [ReactionEvent] {
         let sql = """
             SELECT m.ROWID, m.associated_message_guid, m.associated_message_type,
-                   m.associated_message_emoji, m.is_from_me
+                   m.associated_message_emoji, m.is_from_me, COALESCE(h.id, '')
               FROM message m
               JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+            LEFT JOIN handle h ON h.ROWID = m.handle_id
              WHERE cmj.chat_id = ?
                AND m.ROWID > ?
                AND m.associated_message_guid IS NOT NULL
@@ -236,7 +267,8 @@ actor ChatDBReader {
                 targetGuid: ReactionEvent.targetGuid(from: associated),
                 emoji: emoji,
                 isFromMe: columnInt64(stmt, 4) != 0,
-                isRemoval: type >= 3000
+                isRemoval: type >= 3000,
+                sender: columnInt64(stmt, 4) != 0 ? "" : (columnString(stmt, 5) ?? "")
             )
         }
     }

@@ -25,8 +25,14 @@ struct MessageListView: View {
                         if viewModel.isFirstOfDay(index, in: visible) {
                             DayDivider(date: message.date)
                         }
-                        MessageRow(message: message)
-                            .id(message.id)
+                        MessageRow(
+                            message: message,
+                            senderLabel: viewModel.isGroupChat && !message.isFromMe
+                                && (index == 0 || visible[index - 1].handleId != message.handleId
+                                    || visible[index - 1].isFromMe)
+                                ? message.senderName : nil
+                        )
+                        .id(message.id)
                     }
                 }
                 .padding(.horizontal, 20)
@@ -108,6 +114,8 @@ private struct ScrollSpot: Equatable {
 
 struct MessageRow: View {
     let message: ChatMessage
+    /// Group chats: who sent it (shown when the sender changes).
+    var senderLabel: String? = nil
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -120,6 +128,12 @@ struct MessageRow: View {
         HStack {
             if message.isFromMe { Spacer(minLength: 48) }
             VStack(alignment: message.isFromMe ? .trailing : .leading, spacing: 3) {
+                if let senderLabel, !senderLabel.isEmpty {
+                    Text(senderLabel)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 12)
+                }
                 Text(message.text)
                     .textSelection(.enabled)
                     .padding(.horizontal, 14)
@@ -134,11 +148,14 @@ struct MessageRow: View {
                     // follow the bubble, not the column).
                     .overlay(alignment: message.isFromMe ? .topLeading : .topTrailing) {
                         if !message.reactions.isEmpty {
+                            // Like Messages: the pill sits above the bubble,
+                            // its bottom about halfway down the bubble's top
+                            // padding, so it never covers the text.
                             ReactionBadge(reactions: message.reactions)
-                                .offset(x: message.isFromMe ? -12 : 12, y: -12)
+                                .offset(x: message.isFromMe ? -12 : 12, y: -16)
                         }
                     }
-                    .padding(.top, message.reactions.isEmpty ? 0 : 10)
+                    .padding(.top, message.reactions.isEmpty ? 0 : 16)
                     .frame(maxWidth: 560, alignment: message.isFromMe ? .trailing : .leading)
                 Text(Self.timeFormatter.string(from: message.date))
                     .font(.caption2)
@@ -153,6 +170,7 @@ struct MessageRow: View {
 
 struct ReactionBadge: View {
     let reactions: [Reaction]
+    @State private var showWho = false
 
     var body: some View {
         HStack(spacing: 2) {
@@ -163,7 +181,59 @@ struct ReactionBadge: View {
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
         .glassSurface(Capsule())
-        .help(reactions.map { "\($0.isFromMe ? "You" : "Them"): \($0.emoji)" }.joined(separator: "\n"))
+        .contentShape(Capsule())
+        // Click to see who reacted, like Messages.
+        .onTapGesture { showWho = true }
+        .popover(isPresented: $showWho, arrowEdge: .top) {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(reactions.enumerated()), id: \.offset) { _, r in
+                    HStack(spacing: 10) {
+                        Avatar(handle: r.isFromMe ? nil : r.sender)
+                        Text(Self.name(for: r)).lineLimit(1)
+                        Spacer(minLength: 12)
+                        Text(r.emoji).font(.title3)
+                    }
+                }
+            }
+            .padding(12)
+            .frame(minWidth: 200)
+        }
+        .help("Click to see who reacted")
+    }
+
+    static func name(for r: Reaction) -> String {
+        if r.isFromMe { return "You" }
+        return ContactNames.shared.name(for: r.sender) ?? (r.sender.isEmpty ? "Them" : r.sender)
+    }
+}
+
+/// Contact photo, or initials in a tinted circle when there isn't one.
+struct Avatar: View {
+    /// nil = you.
+    let handle: String?
+    var size: CGFloat = 28
+
+    var body: some View {
+        Group {
+            if let handle, let data = ContactNames.shared.photo(for: handle), let image = NSImage(data: data) {
+                Image(nsImage: image).resizable().scaledToFill()
+            } else {
+                ZStack {
+                    LinearGradient(colors: [WeftStyle.accent, WeftStyle.teal], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    Text(initials).font(.system(size: size * 0.4, weight: .semibold)).foregroundStyle(.white)
+                }
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+    }
+
+    private var initials: String {
+        guard let handle else { return "Me" }
+        let name = ContactNames.shared.name(for: handle) ?? ""
+        let letters = name.split(separator: " ").prefix(2).compactMap(\.first)
+        if !letters.isEmpty { return String(letters).uppercased() }
+        return handle.contains("@") ? String(handle.prefix(1)).uppercased() : "#"
     }
 }
 

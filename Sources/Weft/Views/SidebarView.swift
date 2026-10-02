@@ -7,6 +7,56 @@ struct SidebarView: View {
 
     var body: some View {
         List {
+            // Every added conversation, in your order (drag to reorder).
+            // Right-click a conversation for more options.
+            Section {
+                ForEach(viewModel.followedChats) { chat in
+                    // A tap, not a Button: a Button takes the mouse press,
+                    // which stops the list from starting a drag to reorder.
+                    ConversationRow(
+                        isSelected: viewModel.settings.selectedChatRowID == chat.id,
+                        action: { Task { await viewModel.selectChat(chat) } }
+                    ) {
+                        Label {
+                            Text(ContactNames.shared.shortDisplay(chat.participants)).lineLimit(1)
+                        } icon: {
+                            Image(systemName: chat.participants.contains(",") ? "person.3.fill" : "person.crop.circle.fill")
+                                .foregroundStyle(WeftStyle.accent)
+                        }
+                        Spacer(minLength: 4)
+                        if viewModel.background.unread.contains(chat.id) {
+                            Circle().fill(WeftStyle.accent).frame(width: 8, height: 8)
+                                .help("New messages")
+                        }
+                    }
+                    .contextMenu {
+                        Button("Open") { Task { await viewModel.selectChat(chat) } }
+                        Divider()
+                        Button("Remove from Weft", role: .destructive) {
+                            Task { await viewModel.removeConversation(chat.id) }
+                        }
+                    }
+                }
+                .onMove { from, to in
+                    // Reorder what's shown; keep any not-shown ids at the end.
+                    var ids = viewModel.followedChats.map(\.id)
+                    ids.move(fromOffsets: from, toOffset: to)
+                    viewModel.settings.followedChats = ids + viewModel.settings.followedChats.filter { !ids.contains($0) }
+                }
+            } header: {
+                HStack {
+                    Text("Conversations")
+                    Spacer()
+                    Button {
+                        viewModel.showChatPicker = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Add a conversation")
+                }
+            }
+
             Section("Threads") {
                 SidebarRow(
                     isSelected: viewModel.sidebarSelection == .all || viewModel.sidebarSelection == nil,
@@ -87,6 +137,30 @@ struct SidebarView: View {
 
     private func chatTitle(_ chat: ChatInfo) -> String {
         chat.participants.isEmpty ? "Conversation" : ContactNames.shared.display(chat.participants)
+    }
+}
+
+/// Conversation row: same look as SidebarRow, but opened with a tap so the
+/// list can drag it to reorder.
+private struct ConversationRow<Content: View>: View {
+    let isSelected: Bool
+    let action: () -> Void
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) { content() }
+            .padding(.vertical, 7)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(isSelected ? AnyShapeStyle(WeftStyle.selection) : AnyShapeStyle(Color.clear))
+            )
+            .fontWeight(isSelected ? .semibold : .regular)
+            .onTapGesture(perform: action)
+            .listRowInsets(EdgeInsets(top: 1, leading: 4, bottom: 1, trailing: 4))
+            .accessibilityAddTraits(.isButton)
     }
 }
 

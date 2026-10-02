@@ -15,6 +15,15 @@ struct ChatMessage: Identifiable, Sendable, Hashable {
     var guid: String = ""
     /// Reactions (tapbacks / emoji) currently attached to this message.
     var reactions: [Reaction] = []
+    /// Contact name (or number) of whoever sent it; empty for your own.
+    var senderName: String = ""
+
+    /// Label used in transcripts sent to the AI: "You", the sender's name
+    /// (group chats, known contacts), or "Them".
+    var speaker: String {
+        if isFromMe { return "You" }
+        return senderName.isEmpty ? "Them" : senderName
+    }
 
     /// iMessage stores `message.date` as INTEGER nanoseconds since the Cocoa
     /// epoch (2001-01-01 00:00:00 UTC). 978307200 is the number of seconds
@@ -31,6 +40,9 @@ struct ChatMessage: Identifiable, Sendable, Hashable {
 struct Reaction: Sendable, Hashable {
     let emoji: String
     let isFromMe: Bool
+    /// Who reacted (handle); "" for you. Groups can have several people
+    /// reacting to the same message.
+    var sender: String = ""
 }
 
 /// One reaction row as read from the database: an add or a removal.
@@ -40,6 +52,8 @@ struct ReactionEvent: Sendable {
     let emoji: String
     let isFromMe: Bool
     let isRemoval: Bool
+    /// Who reacted (handle); "" for you.
+    var sender: String = ""
 
     /// associated_message_type: 2000–2007 add, 3000–3007 remove the same kind.
     /// 2006 is an any-emoji reaction (the emoji is in associated_message_emoji).

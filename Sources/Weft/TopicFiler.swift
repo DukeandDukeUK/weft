@@ -82,7 +82,7 @@ struct TopicFiler: Sendable {
         func render(_ m: ChatMessage) -> String {
             var text = m.text.replacingOccurrences(of: "\n", with: " ")
             if text.count > 2_000 { text = String(text.prefix(2_000)) + "…" }
-            return "\(m.isFromMe ? "You" : "Them") (\(formatter.string(from: m.date))): \(text)"
+            return "\(m.speaker) (\(formatter.string(from: m.date))): \(text)"
         }
 
         var prompt = "EXISTING TOPICS (most recently active first):\n"
@@ -99,7 +99,7 @@ struct TopicFiler: Sendable {
         for (i, m) in newMessages.enumerated() { prompt += "[\(i)] \(render(m))\n" }
 
         let system = """
-            You file new messages from a chat between a person ("You") and the other side ("Them" — often an AI assistant) into topics.
+            You file new messages from a chat between a person ("You") and one or more others (each line is labeled with who sent it; often an AI assistant) into topics.
             Return ONLY a JSON object — no markdown fences, no commentary — with keys:
             "assignments": array covering every NEW message index exactly once, as contiguous in-order ranges:
                {"start": i, "end": j, "topic": k} (k as a plain number, e.g. 3 for T3) to add messages i..j to existing topic Tk, optionally with
@@ -107,7 +107,7 @@ struct TopicFiler: Sendable {
                {"start": i, "end": j, "newTitle": "...", "newSummary": "..."} to start a new topic
                (title 6 words max, specific; summary one sentence).
             "newLoops": array of {"title", "detail"} for requests from You with no resolution yet, or promises from
-               Them not yet completed, that appear in the NEW messages and are not already in OPEN LOOPS. [] if none.
+               the others not yet completed, that appear in the NEW messages and are not already in OPEN LOOPS. [] if none.
             "resolvedLoops": array of OPEN LOOPS titles (copied exactly) that the NEW messages clearly resolve. [] if none.
             Use an existing topic when the new messages continue its subject; start a new topic only for a genuinely new subject.
             """

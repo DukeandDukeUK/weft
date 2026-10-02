@@ -30,7 +30,7 @@ struct TopicSegmenter: Sendable {
     func segment(messages: [ChatMessage]) async throws -> [Topic] {
         let (numbered, transcript) = Self.buildTranscript(messages: messages, maxTotalChars: client.transcriptCharLimit)
         let system = """
-            You are organizing a chat transcript between a person ("You") and the other side ("Them" — often an AI assistant) into topics.
+            You are organizing a chat transcript between a person ("You") and one or more others (each line is labeled with who sent it; often an AI assistant) into topics.
             Messages are numbered [0], [1], ... in chronological order.
             Return ONLY a JSON array — no markdown fences, no commentary — of objects with keys:
             "title": short topic title, 6 words max, specific ("Bali visa paperwork", not "Discussion")
@@ -64,7 +64,7 @@ struct TopicSegmenter: Sendable {
             if text.count > maxCharsPerMessage {
                 text = String(text.prefix(maxCharsPerMessage)) + "…"
             }
-            let speaker = message.isFromMe ? "You" : "Them"
+            let speaker = message.speaker
             return "\(speaker) (\(formatter.string(from: message.date))): \(text)"
         }
         // Walk newest → oldest until a cap is hit.

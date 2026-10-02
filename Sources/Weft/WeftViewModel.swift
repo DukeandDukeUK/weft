@@ -8,6 +8,16 @@ import AppKit
 @MainActor @Observable
 final class WeftViewModel {
     let settings = AppSettings.shared
+    /// Sorts the conversations you aren't looking at.
+    let background = BackgroundSorter()
+
+    /// Added conversations, in the order added (for the sidebar switcher).
+    var followedChats: [ChatInfo] {
+        settings.followedChats.compactMap { id in chats.first { $0.id == id } }
+    }
+
+    /// Group chats show who said what; replying isn't supported for them yet.
+    var isGroupChat: Bool { settings.selectedHandleId.contains(",") }
 
     // Data
     var chats: [ChatInfo] = []
@@ -158,6 +168,8 @@ final class WeftViewModel {
     func selectChat(_ chat: ChatInfo) async {
         stopPolling()
         settings.selectedChatRowID = chat.id
+        if !settings.followedChats.contains(chat.id) { settings.followedChats.append(chat.id) }
+        background.markRead(chat.id)
         // For 1:1 chats the single participant is who we send to.
         settings.selectedHandleId = chat.participants
         sidebarSelection = .all
@@ -168,8 +180,9 @@ final class WeftViewModel {
         isLoading = true
         defer { isLoading = false }
         do {
-            messages = try await ChatDBReader.shared.fetchMessages(chatRowID: chat.id)
+            messages = try await ChatDBReader.shared.fetchMessages(chatRowID: chat.id).map(Self.labeled)
             lastSeenRowID = messages.last?.id ?? 0
+            settings.markViewed(chat: chat.id, through: messages.map(\.id).max() ?? 0)
             lastReactionRowID = 0
             await applyNewReactions(chatRowID: chat.id)
             pendingMessageIDs = []
@@ -225,12 +238,16 @@ final class WeftViewModel {
         defer { isPolling = false }
         do {
             let known = Set(messages.map(\.id))
+            // Other added conversations get checked too (debounced).
+            background.schedule(settings: settings) { [weak self] in self?.settings.selectedChatRowID }
             let fresh = try await ChatDBReader.shared
                 .fetchMessages(chatRowID: chatId, after: lastSeenRowID)
                 .filter { !known.contains($0.id) }
+                .map(Self.labeled)
             if !fresh.isEmpty {
                 messages.append(contentsOf: fresh)
                 lastSeenRowID = max(lastSeenRowID, fresh.map(\.id).max() ?? 0)
+                settings.markViewed(chat: chatId, through: lastSeenRowID)
             }
             // Reactions can arrive on their own, after the message they're on.
             await applyNewReactions(chatRowID: chatId)
@@ -314,6 +331,37 @@ final class WeftViewModel {
         }
     }
 
+    // MARK: - Conversations
+
+    /// Contact name (or number) on each incoming message, for group chats
+    /// and for the AI transcript.
+    static func labeled(_ m: ChatMessage) -> ChatMessage {
+        var m = m
+        m.senderName = BackgroundSorter.senderName(m)
+        return m
+    }
+
+    /// Refresh the list of all conversations (for the picker).
+    func reloadChats() async {
+        if let fresh = try? await ChatDBReader.shared.listChats() { chats = fresh }
+    }
+
+    /// Stop following a conversation. Its saved threads are kept, so adding
+    /// it back later is instant.
+    func removeConversation(_ id: Int64) async {
+        settings.followedChats.removeAll { $0 == id }
+        background.markRead(id)
+        guard settings.selectedChatRowID == id else { return }
+        if let next = followedChats.first {
+            await selectChat(next)
+        } else {
+            stopPolling()
+            settings.selectedChatRowID = nil
+            messages = []; topics = []; loops = []
+            showChatPicker = true
+        }
+    }
+
     // MARK: - Reactions
 
     /// Apply reaction rows newer than the last one seen: each person has at
@@ -327,12 +375,14 @@ final class WeftViewModel {
         for event in events {
             guard let i = indexByGuid[event.targetGuid] else { continue }
             var reactions = messages[i].reactions
+            // Match on who reacted, so in a group one person's reaction
+            // doesn't replace someone else's.
             if event.isRemoval {
-                reactions.removeAll { $0.isFromMe == event.isFromMe && $0.emoji == event.emoji }
+                reactions.removeAll { $0.sender == event.sender && $0.emoji == event.emoji }
             } else {
-                // Classic tapbacks replace the same person's previous one.
-                reactions.removeAll { $0.isFromMe == event.isFromMe }
-                reactions.append(Reaction(emoji: event.emoji, isFromMe: event.isFromMe))
+                // A person's new reaction replaces their previous one.
+                reactions.removeAll { $0.sender == event.sender }
+                reactions.append(Reaction(emoji: event.emoji, isFromMe: event.isFromMe, sender: event.sender))
             }
             messages[i].reactions = reactions
         }

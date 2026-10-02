@@ -16,7 +16,7 @@ struct SettingsView: View {
                 LabeledContent("Conversation") {
                     Text(viewModel.settings.selectedHandleId.isEmpty
                         ? "None chosen"
-                        : viewModel.settings.selectedHandleId)
+                        : ContactNames.shared.display(viewModel.settings.selectedHandleId))
                     .lineLimit(1)
                 }
                 Button("Choose conversation…") {
@@ -65,6 +65,19 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(minWidth: 500, minHeight: 460)
+        // Sheets on macOS don't close on an outside click, so give it a
+        // Done button (Return or Esc also close it).
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+                    .glassButton(prominent: true)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(.bar)
+        }
         .padding()
         .onAppear(perform: checkPermissions)
     }
@@ -128,9 +141,23 @@ struct ChatPickerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Choose the conversation to sort")
-                .font(.headline)
-                .padding()
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Add a conversation to Weft")
+                        .font(.headline)
+                    Text("Each added conversation is kept sorted in the background, which uses a little of your AI plan as new messages arrive.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                // Only offer Cancel once a conversation has been chosen —
+                // on first launch there's nothing to go back to.
+                if viewModel.settings.selectedChatRowID != nil {
+                    Button("Cancel") { dismiss() }
+                        .keyboardShortcut(.cancelAction)
+                }
+            }
+            .padding()
             if viewModel.chats.isEmpty {
                 Text("No conversations found in the Messages database.")
                     .foregroundStyle(.secondary)
@@ -142,6 +169,11 @@ struct ChatPickerView: View {
                         dismiss()
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
+                            if viewModel.settings.followedChats.contains(chat.id) {
+                                Label("Added", systemImage: "checkmark.circle.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(WeftStyle.accent)
+                            }
                             if chat.participants.isEmpty {
                                 Text("(unknown participant)").lineLimit(1)
                             } else if ContactNames.shared.shortDisplay(chat.participants) != chat.participants {
@@ -176,6 +208,9 @@ struct ChatPickerView: View {
             }
         }
         .frame(minWidth: 480, minHeight: 420)
-        .task { await ContactNames.shared.load() }
+        .task {
+            await ContactNames.shared.load()
+            await viewModel.reloadChats()
+        }
     }
 }

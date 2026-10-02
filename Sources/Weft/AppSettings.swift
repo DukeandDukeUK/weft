@@ -27,6 +27,22 @@ final class AppSettings {
     /// Start replies sent from inside a thread with "Re: <thread title> — "
     /// so the other side knows which subject you mean.
     var prefixThreadReplies: Bool { didSet { defaults.set(prefixThreadReplies, forKey: Keys.prefix) } }
+    /// Conversations added to Weft (chat.ROWIDs), in the order added. All of
+    /// them are kept sorted in the background.
+    var followedChats: [Int64] {
+        didSet { defaults.set(followedChats.map(String.init), forKey: Keys.followed) }
+    }
+    /// Newest message seen per conversation — drives the "new messages" dot.
+    private(set) var lastViewed: [String: Int64]
+
+    func markViewed(chat: Int64, through rowID: Int64) {
+        guard rowID > (lastViewed[String(chat)] ?? 0) else { return }
+        lastViewed[String(chat)] = rowID
+        defaults.set(lastViewed, forKey: Keys.lastViewed)
+    }
+
+    func lastViewedRowID(chat: Int64) -> Int64 { lastViewed[String(chat)] ?? 0 }
+
     /// "system" (follow macOS), "light" or "dark".
     var appearance: String {
         didSet {
@@ -46,6 +62,8 @@ final class AppSettings {
         static let handleId = "weft.handleId"
         static let prefix = "weft.prefixThreadReplies"
         static let appearance = "weft.appearance"
+        static let followed = "weft.followedChats"
+        static let lastViewed = "weft.lastViewed"
     }
 
     private init() {
@@ -60,6 +78,11 @@ final class AppSettings {
         self.selectedHandleId = d.string(forKey: Keys.handleId) ?? ""
         self.prefixThreadReplies = d.object(forKey: Keys.prefix) as? Bool ?? true
         self.appearance = d.string(forKey: Keys.appearance) ?? "system"
+        var followed = (d.stringArray(forKey: Keys.followed) ?? []).compactMap(Int64.init)
+        // Earlier versions followed exactly one conversation.
+        if followed.isEmpty, let only = d.string(forKey: Keys.chatRowID).flatMap(Int64.init) { followed = [only] }
+        self.followedChats = followed
+        self.lastViewed = (d.dictionary(forKey: Keys.lastViewed) as? [String: Int64]) ?? [:]
         Self.apply(appearance: appearance)
     }
 
