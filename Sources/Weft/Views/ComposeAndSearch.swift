@@ -17,16 +17,14 @@ struct ComposeView: View {
             // Grows up to 6 lines as you type; Enter sends, Option-Return
             // adds a new line (the standard Mac text-field behaviour).
             TextField(
-                viewModel.isGroupChat
-                    ? "Replying to group chats isn't supported yet — reply in Messages"
-                    : (viewModel.selectedTopic.map { "Reply in “\($0.title)”" } ?? "Message"),
+                viewModel.selectedTopic.map { "Reply in “\($0.title)”" }
+                    ?? (viewModel.isGroupChat ? "Message the group" : "Message"),
                 text: $draft,
                 axis: .vertical
             )
             .textFieldStyle(.plain)
             .font(.body)
             .lineLimit(1...6)
-            .disabled(viewModel.isGroupChat)
             .onSubmit(send)
             .padding(.vertical, 8)
             Button(action: send) {
@@ -45,7 +43,7 @@ struct ComposeView: View {
         .glassSurface(RoundedRectangle(cornerRadius: 22, style: .continuous), tint: WeftStyle.accent.opacity(0.08), interactive: true)
         .help(viewModel.canSend
             ? "Enter to send, Option-Return for a new line"
-            : "Sending needs a 1:1 conversation with a single participant")
+            : "This conversation can't be replied to from Weft")
     }
 
     private func send() {

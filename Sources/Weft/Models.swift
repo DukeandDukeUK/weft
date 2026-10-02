@@ -93,6 +93,11 @@ struct ChatInfo: Identifiable, Sendable, Hashable {
     let messageCount: Int
     let lastDate: Date?
     let lastSnippet: String?
+    /// chat.guid — Messages' own id for the conversation; used to send to a
+    /// whole group chat.
+    var guid: String = ""
+    /// "iMessage" or "SMS".
+    var service: String = ""
 }
 
 // MARK: - Topic

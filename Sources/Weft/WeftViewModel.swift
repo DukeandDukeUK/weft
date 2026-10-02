@@ -89,9 +89,11 @@ final class WeftViewModel {
     }
 
     /// Sending is only supported for 1:1 conversations (one handle).
+    /// One-to-one: send to the person. Group: send to the chat itself, which
+    /// reaches the whole group.
     var canSend: Bool {
-        let handle = settings.selectedHandleId
-        return !handle.isEmpty && !handle.contains(",")
+        if isGroupChat { return !(selectedChat?.guid ?? "").isEmpty }
+        return !settings.selectedHandleId.isEmpty
     }
 
     var openLoopCount: Int { loops.filter { $0.status == .open }.count }
@@ -613,6 +615,8 @@ final class WeftViewModel {
         var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, canSend, !isSending else { return }
         let handle = settings.selectedHandleId
+        let groupChatGuid = isGroupChat ? selectedChat?.guid : nil
+        let groupService = selectedChat?.service ?? ""
         // Replying inside a thread: tell the other side which subject this is, and
         // keep this message and the replies to it in the thread.
         if let topic = selectedTopic {
@@ -628,7 +632,11 @@ final class WeftViewModel {
         do {
             // Detached: osascript is synchronous and must not block the UI.
             try await Task.detached {
-                try MessageSender.send(text: trimmed, to: handle)
+                if let groupChatGuid, !groupChatGuid.isEmpty {
+                    try MessageSender.send(text: trimmed, toChat: groupChatGuid, service: groupService)
+                } else {
+                    try MessageSender.send(text: trimmed, to: handle)
+                }
             }.value
             await pollOnce() // pick up our own message quickly
             scrollToken += 1

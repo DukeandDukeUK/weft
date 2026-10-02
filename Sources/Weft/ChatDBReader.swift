@@ -139,7 +139,9 @@ actor ChatDBReader {
                      WHERE j2.chat_id = c.ROWID ORDER BY mm.date DESC, mm.ROWID DESC LIMIT 1),
                    (SELECT mm.attributedBody FROM message mm
                       JOIN chat_message_join j2 ON j2.message_id = mm.ROWID
-                     WHERE j2.chat_id = c.ROWID ORDER BY mm.date DESC, mm.ROWID DESC LIMIT 1)
+                     WHERE j2.chat_id = c.ROWID ORDER BY mm.date DESC, mm.ROWID DESC LIMIT 1),
+                   c.guid,
+                   COALESCE(c.service_name, '')
               FROM chat c
             LEFT JOIN chat_handle_join chj ON chj.chat_id = c.ROWID
             LEFT JOIN handle h ON h.ROWID = chj.handle_id
@@ -163,7 +165,9 @@ actor ChatDBReader {
                 participants: participants,
                 messageCount: count,
                 lastDate: lastDate,
-                lastSnippet: snippet
+                lastSnippet: snippet,
+                guid: columnString(stmt, 6) ?? "",
+                service: columnString(stmt, 7) ?? ""
             )
         }
     }
