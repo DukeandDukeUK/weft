@@ -27,10 +27,16 @@ if ! command -v swift >/dev/null 2>&1; then
     exit 1
 fi
 
-echo "==> Building (release, Apple Silicon + Intel)…"
-swift build -c release --arch arm64 --arch x86_64
+# Record source paths as /weft/... instead of this Mac's folders, so the
+# built app doesn't contain the builder's username.
+BUILD_FLAGS=(-c release --arch arm64 --arch x86_64
+    -Xswiftc -file-prefix-map -Xswiftc "$PWD=/weft"
+    -Xswiftc -debug-prefix-map -Xswiftc "$PWD=/weft")
 
-BIN_DIR="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)"
+echo "==> Building (release, Apple Silicon + Intel)…"
+swift build "${BUILD_FLAGS[@]}"
+
+BIN_DIR="$(swift build "${BUILD_FLAGS[@]}" --show-bin-path)"
 BIN="$BIN_DIR/$EXEC_NAME"
 if [ ! -f "$BIN" ]; then
     echo "error: expected binary not found at $BIN" >&2
@@ -41,6 +47,8 @@ echo "==> Assembling ${APP_DIR}…"
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$BIN" "$APP_DIR/Contents/MacOS/$EXEC_NAME"
+# Drop debugging info (it lists build folders); the app doesn't need it.
+strip -S -x "$APP_DIR/Contents/MacOS/$EXEC_NAME"
 
 # Sparkle (automatic updates). ditto keeps the framework's internal symlinks.
 mkdir -p "$APP_DIR/Contents/Frameworks"
@@ -121,6 +129,12 @@ if [ -n "$IDENTITY" ]; then
 else
     echo "==> No Developer ID certificate found — ad-hoc signing (this Mac only)…"
     codesign --force --deep --sign - "$APP_DIR" >/dev/null
+fi
+
+# Refuse to ship anything that still mentions this Mac's home folder.
+if LC_ALL=C grep -rqa "$HOME" "$APP_DIR"; then
+    echo "error: the app still contains paths from $HOME — not safe to publish." >&2
+    exit 1
 fi
 
 echo ""
