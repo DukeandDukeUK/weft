@@ -279,7 +279,7 @@ final class WeftViewModel {
                 followUpQueue = Set(cached.followUpQueue ?? []).intersection(messages.map(\.id))
                 let filed = Set(cached.topics.flatMap(\.messageIds))
                 showProvisionally(messages.filter { $0.id > cached.newestRowId && !filed.contains($0.id) })
-                if !pendingMessageIDs.isEmpty || !followUpQueue.isEmpty { scheduleAutoSort(after: 0) }
+                if hasWaitingWork { scheduleAutoSort(after: 0) }
             } else if !messages.isEmpty {
                 // First time: the consent check (at the AI call) asks first.
                 scheduleAutoSort(after: 0)
@@ -424,7 +424,7 @@ final class WeftViewModel {
                 Task { await self?.analyze() }
             }
         }
-        if !pendingMessageIDs.isEmpty { scheduleAutoSort(after: 3) }
+        if hasWaitingWork { scheduleAutoSort(after: 3) }
         startHistoryBackfill()
     }
 
@@ -454,6 +454,10 @@ final class WeftViewModel {
 
     func isPaused(_ chat: Int64) -> Bool { settings.pausedChats.contains(chat) }
 
+    /// New messages waiting to be filed, or your topic replies waiting
+    /// for a follow-up check.
+    var hasWaitingWork: Bool { !pendingMessageIDs.isEmpty || !followUpQueue.isEmpty }
+
     func setPaused(_ chat: Int64, _ paused: Bool) {
         if paused {
             settings.pausedChats.insert(chat)
@@ -466,7 +470,7 @@ final class WeftViewModel {
         } else {
             settings.pausedChats.remove(chat)
             if chat == settings.selectedChatRowID {
-                if !pendingMessageIDs.isEmpty || topics.isEmpty { scheduleAutoSort(after: 0) }
+                if hasWaitingWork || topics.isEmpty { scheduleAutoSort(after: 0) }
                 startHistoryBackfill()
             }
         }
@@ -1154,7 +1158,7 @@ final class WeftViewModel {
             sortTopicsByActivity()
             topicsStale = false
             saveCache(chat: myChat, filedThrough: Self.checkpoint(messages: messages, pending: pendingMessageIDs))
-            if !pendingMessageIDs.isEmpty || !followUpQueue.isEmpty {
+            if hasWaitingWork {
                 // More waiting (a later batch, skipped, or replies still to
                 // check for follow-ups): go again.
                 scheduleAutoSort(after: stillPending.isDisjoint(with: batchIDs) ? 0 : 3)
@@ -1265,7 +1269,8 @@ final class WeftViewModel {
             newestRowId: cached?.newestRowId ?? lastSeenRowID,
             generatedAt: cached?.generatedAt ?? Date(),
             topics: cached?.topics ?? topics,
-            loops: loops
+            loops: loops,
+            followUpQueue: followUpQueue.sorted()
         )
         try? SegmentationCache.save(analysis, chatId: chatId)
         syncReminders()

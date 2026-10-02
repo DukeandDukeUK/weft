@@ -695,4 +695,39 @@ final class WeftTests: XCTestCase {
         XCTAssertEqual(checked.count, 8, "only \(checked.count) of 8 replies were checked")
         XCTAssertTrue(vm.followUpQueue.isEmpty)
     }
+
+    // MARK: - 0.2.7 fixes (Astra's 0.2.6 review)
+
+    private func queuedReplyVM(chat: Int64) -> (WeftViewModel, OpenLoop) {
+        let vm = WeftViewModel()
+        vm.chats = [ChatInfo(id: chat, participants: "x", messageCount: 2, lastDate: nil, lastSnippet: nil)]
+        vm.settings.selectedChatRowID = chat
+        vm.settings.grantConsent(chat)
+        let loop = OpenLoop(id: UUID(), title: "Old one", detail: "", status: .open, createdDate: Date())
+        vm.messages = [msg(1), msg(2, "I'll call them", me: true)]
+        vm.topics = [Topic(id: UUID(), title: "A", summary: "", messageIds: [1, 2])]
+        vm.loops = [loop]
+        vm.followUpQueue = [2]
+        return (vm, loop)
+    }
+
+    // Editing a follow-up keeps the saved list of replies still to check.
+    func testEditingFollowUpKeepsSavedReplyQueue() {
+        let (vm, loop) = queuedReplyVM(chat: 2_200)
+        vm.setLoopStatus(loop, .resolved)
+        XCTAssertEqual(SegmentationCache.load(chatId: 2_200)?.followUpQueue, [2], "editing a follow-up erased the queue")
+    }
+
+    // Resuming a paused conversation checks replies that were waiting.
+    func testResumeChecksWaitingReplies() async throws {
+        var calls = 0
+        LLMClient.testResponder = { _, _ in calls += 1; return #"{"assignments":[],"newLoops":[],"resolvedLoops":[]}"# }
+        let (vm, _) = queuedReplyVM(chat: 2_300)
+        vm.setPaused(2_300, true)
+        defer { vm.settings.pausedChats.remove(2_300) }
+        vm.setPaused(2_300, false)
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(calls, 1, "resuming didn't check the waiting reply")
+        XCTAssertTrue(vm.followUpQueue.isEmpty)
+    }
 }
