@@ -959,6 +959,11 @@ final class WeftViewModel {
     /// it back later is instant.
     func removeConversation(_ id: Int64) async {
         settings.followedChats.removeAll { $0 == id }
+        // Its topics and follow-ups go too: added back later, it's sorted
+        // from scratch like any new conversation.
+        SegmentationCache.delete(chatId: id)
+        settings.forgetConversation(id)
+        drafts[id] = nil
         // Its reminders go too.
         Notifier.shared.syncReminders(loops: [], chat: id, conversationName: "", settings: settings)
         background.markRead(id)

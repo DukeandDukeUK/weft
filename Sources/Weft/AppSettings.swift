@@ -88,6 +88,15 @@ final class AppSettings {
     /// conversations that were already sorted were being sent to the AI
     /// selected now, so that one (only) counts as OK'd. Opening any of
     /// them later with a different AI asks.
+    /// A removed conversation starts over if it's added back: Weft asks
+    /// before sending it to the AI again, and it isn't paused.
+    func forgetConversation(_ chat: Int64) {
+        consents[String(chat)] = nil
+        defaults.set(consents, forKey: Keys.consents)
+        pausedChats.remove(chat)
+        recentOnlyChats.remove(chat)
+    }
+
     func migrateLegacyConsentOnce() {
         let key = "weft.legacyConsentMigrated"
         guard !defaults.bool(forKey: key) else { return }

@@ -54,6 +54,12 @@ enum SegmentationCache {
         return data.hashValue
     }
 
+    /// Forget a conversation's topics and follow-ups (it was removed).
+    static func delete(chatId: Int64) {
+        guard let url = try? fileURL(chatId: chatId) else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
     static func save(_ analysis: CachedAnalysis, chatId: Int64) throws {
         let url = try fileURL(chatId: chatId)
         let data = try JSONEncoder().encode(analysis)

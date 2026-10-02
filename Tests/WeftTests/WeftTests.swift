@@ -892,8 +892,23 @@ final class WeftTests: XCTestCase {
         XCTAssertTrue(vm.loops.isEmpty)
         XCTAssertEqual(SegmentationCache.load(chatId: b)?.topics.flatMap(\.messageIds).sorted(), [2, 3], "the cleaned version wasn't saved")
     }
-}
 
+    // MARK: - 0.3.3 removing a conversation forgets it
+
+    func testRemovingConversationForgetsItsTopics() async throws {
+        let chat: Int64 = 2_800
+        let vm = WeftViewModel()
+        let before = vm.settings.followedChats
+        defer { vm.settings.followedChats = before }
+        vm.settings.followedChats = [chat, 2_801]
+        vm.settings.grantConsent(chat)
+        try SegmentationCache.save(CachedAnalysis(messageCount: 1, newestRowId: 1, generatedAt: Date(),
+            topics: [Topic(id: UUID(), title: "T", summary: "", messageIds: [1])], loops: []), chatId: chat)
+        await vm.removeConversation(chat)
+        XCTAssertNil(SegmentationCache.load(chatId: chat), "its topics were kept")
+        XCTAssertFalse(vm.settings.hasConsent(chat), "adding it back should ask again, like a new conversation")
+    }
+}
 
 @objc(WeftFakeImage) private final class FakeImage: NSObject, NSCoding {
     override init() {}
