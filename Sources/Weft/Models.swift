@@ -129,6 +129,9 @@ struct OpenLoop: Identifiable, Sendable, Hashable, Codable {
     var createdDate: Date
     /// The message the loop came from (chat.db ROWID), when known.
     var sourceMessageId: Int64? = nil
+    /// Raised while sorting old history: still needs checking against the
+    /// later conversation, which may have resolved it.
+    var needsLaterCheck: Bool? = nil
 }
 
 // MARK: - Sidebar selection

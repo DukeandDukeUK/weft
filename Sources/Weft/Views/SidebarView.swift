@@ -110,7 +110,13 @@ struct SidebarView: View {
                 HStack(spacing: 6) {
                     Text("Threads")
                     Spacer()
-                    if let p = viewModel.historyProgress, p.total > 0 {
+                    if let err = viewModel.historyError {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.caption2)
+                        Text("Couldn't sort older messages").font(.caption2).foregroundStyle(.secondary)
+                            .help(err)
+                        Button("Retry") { viewModel.retryHistory() }
+                            .buttonStyle(.link).font(.caption2)
+                    } else if let p = viewModel.historyProgress, p.total > 0 {
                         ProgressView().controlSize(.mini)
                         Text("Sorting older messages… \(Int(Double(p.done) / Double(p.total) * 100))%")
                             .font(.caption2)

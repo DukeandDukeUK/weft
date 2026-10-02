@@ -46,4 +46,24 @@ struct OpenLoopDetector: Sendable {
             }
             .filter { !$0.title.isEmpty }
     }
+
+    /// Which of these loops (raised earlier) does the later conversation
+    /// clearly resolve? Returns their ids.
+    func resolvedLater(loops: [OpenLoop], laterMessages: [ChatMessage]) async throws -> Set<UUID> {
+        let (_, transcript) = TopicSegmenter.buildTranscript(messages: laterMessages, maxTotalChars: client.transcriptCharLimit)
+        let list = loops.enumerated().map { "L\($0.offset): \($0.element.title) — \($0.element.detail)" }.joined(separator: "\n")
+        let system = """
+            Below are open items from earlier in a chat between a person ("You") and one or more others, followed by the later conversation.
+            Decide which items the later conversation clearly shows were completed or settled.
+            Return ONLY a JSON object — no markdown fences, no commentary: {"resolved": [numbers]} using the L-numbers. [] if none.
+            When unsure, leave an item out.
+            """
+        let raw = try await client.complete(systemPrompt: system, userPrompt: "OPEN ITEMS:\n\(list)\n\nLATER CONVERSATION:\n\(transcript)", purpose: .openLoops)
+        struct DTO: Decodable { let resolved: [Int] }
+        guard let data = TopicSegmenter.stripFences(raw).data(using: .utf8),
+              let dto = try? JSONDecoder().decode(DTO.self, from: data) else {
+            throw TopicSegmenter.AnalysisError.badJSON(raw)
+        }
+        return Set(dto.resolved.compactMap { loops.indices.contains($0) ? loops[$0].id : nil })
+    }
 }
