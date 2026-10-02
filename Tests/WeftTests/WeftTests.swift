@@ -1,4 +1,5 @@
 import XCTest
+import SQLite3
 @testable import Weft
 
 /// Regression tests for bugs found in review. None of them read or send
@@ -329,5 +330,128 @@ final class WeftTests: XCTestCase {
         settings.provider = .claude
         settings.migrateLegacyConsentOnce()                 // runs only once
         XCTAssertFalse(settings.hasConsent(chat, for: .claude))
+    }
+
+    // MARK: - 0.2.3 fixes (Astra's 0.2.2 review)
+
+    /// A tiny Messages-like database for tests.
+    private func fixtureDB(_ rows: [(id: Int64, chat: Int64, text: String?, rich: Data?, me: Bool)]) throws -> String {
+        let path = scratch.appendingPathComponent("chat-\(UUID().uuidString).db").path
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        let schema = """
+            CREATE TABLE message (ROWID INTEGER PRIMARY KEY, text TEXT, attributedBody BLOB, is_from_me INTEGER,
+              date INTEGER, handle_id INTEGER, cache_has_attachments INTEGER, guid TEXT,
+              associated_message_guid TEXT, associated_message_type INTEGER, associated_message_emoji TEXT);
+            CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);
+            CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);
+            CREATE TABLE attachment (ROWID INTEGER PRIMARY KEY, filename TEXT, mime_type TEXT, transfer_name TEXT, total_bytes INTEGER, hide_attachment INTEGER);
+            CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);
+            INSERT INTO handle VALUES (1, '+15555550100');
+            """
+        XCTAssertEqual(sqlite3_exec(db, schema, nil, nil, nil), SQLITE_OK)
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        for r in rows {
+            var stmt: OpaquePointer?
+            sqlite3_prepare_v2(db, "INSERT INTO message VALUES (?, ?, ?, ?, ?, ?, 0, ?, NULL, 0, NULL)", -1, &stmt, nil)
+            sqlite3_bind_int64(stmt, 1, r.id)
+            if let t = r.text { sqlite3_bind_text(stmt, 2, t, -1, transient) } else { sqlite3_bind_null(stmt, 2) }
+            if let b = r.rich { _ = b.withUnsafeBytes { sqlite3_bind_blob(stmt, 3, $0.baseAddress, Int32(b.count), transient) } } else { sqlite3_bind_null(stmt, 3) }
+            sqlite3_bind_int64(stmt, 4, r.me ? 1 : 0)
+            sqlite3_bind_int64(stmt, 5, r.id * 1_000_000_000)
+            sqlite3_bind_int64(stmt, 6, r.me ? 0 : 1)
+            sqlite3_bind_text(stmt, 7, "guid-\(r.id)", -1, transient)
+            sqlite3_step(stmt); sqlite3_finalize(stmt)
+            sqlite3_exec(db, "INSERT INTO chat_message_join VALUES (\(r.chat), \(r.id))", nil, nil, nil)
+        }
+        return path
+    }
+
+    // #5 — rich-text-only messages are found by global search.
+    func testSearchFindsRichTextOnlyMessages() async throws {
+        let rich = try NSKeyedArchiver.archivedData(withRootObject: NSAttributedString(string: "Book the flight"), requiringSecureCoding: false)
+        let path = try fixtureDB([(1, 9, nil, rich, false), (2, 9, "Plain flight note", nil, true), (3, 9, "Nothing here", nil, false)])
+        let reader = ChatDBReader(path: path)
+        let hits = try await reader.search("flight", inChats: [9])
+        XCTAssertEqual(Set(hits.map(\.message.id)), [1, 2])
+        let again = try await reader.search("book", inChats: [9])   // from the session cache
+        XCTAssertEqual(again.map(\.message.id), [1])
+    }
+
+    // #6 — a bad assignment can't block a good one for the same messages.
+    func testInvalidAssignmentDoesNotBlockValidOne() throws {
+        let raw = #"{"assignments":[{"start":0,"end":1,"topic":99},{"start":0,"end":1,"topic":0}],"newLoops":[],"resolvedLoops":[]}"#
+        let r = try TopicFiler.parse(raw, newMessages: [msg(1), msg(2)],
+                                     topics: [Topic(id: UUID(), title: "A", summary: "", messageIds: [0])], openLoops: [])
+        XCTAssertEqual(r.assignments.flatMap(\.messageIds), [1, 2])
+    }
+
+    // #2 — moving a message by hand while sorting is running sticks.
+    func testManualMoveDuringSortSticks() async throws {
+        LLMClient.testResponder = { _, _ in
+            try await Task.sleep(nanoseconds: 300_000_000)
+            return #"{"assignments":[{"start":0,"end":0,"topic":0}],"newLoops":[],"resolvedLoops":[]}"#
+        }
+        let vm = WeftViewModel()
+        vm.chats = [ChatInfo(id: 1_100, participants: "x", messageCount: 3, lastDate: nil, lastSnippet: nil)]
+        vm.settings.selectedChatRowID = 1_100
+        vm.settings.grantConsent(1_100)
+        let a = Topic(id: UUID(), title: "A", summary: "", messageIds: [1])
+        let b = Topic(id: UUID(), title: "B", summary: "", messageIds: [2])
+        vm.messages = [msg(1), msg(2), msg(3)]
+        vm.topics = [a, b]
+        vm.pendingMessageIDs = [3]
+        vm.retryFiling()                                     // AI will say: 3 → A
+        try await Task.sleep(nanoseconds: 100_000_000)
+        vm.editTopics("Move Message", undoManager: nil) { TopicEditor.move($0, messages: [3], to: b.id) }
+        try await Task.sleep(nanoseconds: 600_000_000)
+        XCTAssertEqual(vm.topics.first { $0.id == b.id }?.messageIds, [2, 3], "the AI moved it back")
+        XCTAssertFalse(vm.topics.first { $0.id == a.id }?.messageIds.contains(3) ?? true)
+    }
+
+    // #3 + #4 — background sorting uses bounded batches and updates reminders.
+    func testBackgroundSortingIsBatchedAndSyncsReminders() async throws {
+        let chat: Int64 = 1_200
+        let long = String(repeating: "word ", count: 400)   // ~2,000 characters each
+        let path = try fixtureDB((1...100).map { (Int64($0), chat, long, nil, $0 % 2 == 0) })
+        let settings = AppSettings.shared
+        settings.provider = .ollama
+        settings.setModel("test-model", for: .ollama)
+        defer { settings.provider = .claude }
+        settings.grantConsent(chat)
+        let before = settings.followedChats
+        settings.followedChats = before + [chat]
+        defer { settings.followedChats = before }
+        try SegmentationCache.save(CachedAnalysis(messageCount: 0, newestRowId: 0, generatedAt: Date(),
+            topics: [Topic(id: UUID(), title: "Old", summary: "", messageIds: [0])],
+            loops: [OpenLoop(id: UUID(), title: "Settle up", detail: "", status: .open, createdDate: Date())]), chatId: chat)
+        var largestPrompt = 0
+        LLMClient.testResponder = { _, input in
+            largestPrompt = max(largestPrompt, input.count)
+            return #"{"assignments":[{"start":0,"end":39,"topic":0}],"newLoops":[{"title":"Pay rent","detail":"","message":0,"owner":"me","due":"2099-01-01"}],"resolvedLoops":[0]}"#
+        }
+        let bg = BackgroundSorter()
+        bg.reader = ChatDBReader(path: path)
+        var synced: [OpenLoop] = []
+        bg.reminderSync = { loops, c, _, _ in if c == chat { synced = loops } }
+        await bg.run(settings: settings) { nil }
+        XCTAssertLessThanOrEqual(largestPrompt, 8_000 + 12_000, "background prompt wasn't batched (\(largestPrompt) chars)")
+        XCTAssertTrue(synced.contains { $0.title == "Pay rent" }, "new follow-up's reminder wasn't synced")
+        XCTAssertEqual(synced.first { $0.title == "Settle up" }?.status, .resolved, "settled follow-up's reminder wasn't removed")
+    }
+
+    // #1 — changing notification settings resyncs every conversation's reminders.
+    func testNotificationSettingChangeResyncsAllConversations() throws {
+        let vm = WeftViewModel()
+        let before = vm.settings.followedChats
+        vm.settings.followedChats = [1_301, 1_302]
+        defer { vm.settings.followedChats = before }
+        var seen = Set<Int64>()
+        Notifier.syncObserver = { chat, _ in seen.insert(chat) }
+        defer { Notifier.syncObserver = nil }
+        vm.resyncAllReminders()
+        XCTAssertEqual(seen, [1_301, 1_302])
     }
 }

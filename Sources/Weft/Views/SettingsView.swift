@@ -34,7 +34,7 @@ struct SettingsView: View {
             }
 
             Section("Notifications") {
-                NotificationOptions(settings: viewModel.settings)
+                NotificationOptions(settings: viewModel.settings) { viewModel.resyncAllReminders() }
             }
             .onChange(of: viewModel.settings.dockBadge) { _, _ in viewModel.updateBadge() }
 

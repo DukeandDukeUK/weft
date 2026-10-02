@@ -55,6 +55,14 @@ enum AttributedBodyParser {
 actor ChatDBReader {
     static let shared = ChatDBReader()
 
+    /// Tests use a small fixture database; the app always reads Messages'.
+    private let pathOverride: String?
+    init(path: String? = nil) { pathOverride = path }
+
+    /// Decoded rich-text bodies (messages whose text is only in
+    /// attributedBody), kept for the session so repeat searches are fast.
+    private var decodedText: [Int64: String] = [:]
+
     enum ReaderError: Error, LocalizedError {
         case noDatabase
         case accessDenied(String)
@@ -73,7 +81,7 @@ actor ChatDBReader {
     }
 
     private var dbPath: String {
-        (NSHomeDirectory() as NSString).appendingPathComponent("Library/Messages/chat.db")
+        pathOverride ?? (NSHomeDirectory() as NSString).appendingPathComponent("Library/Messages/chat.db")
     }
 
     enum Access: Sendable {
@@ -225,8 +233,10 @@ actor ChatDBReader {
         return newest != nil ? rows.reversed() : rows
     }
 
-    /// Search several conversations at once, newest first. Matches the
-    /// text column, or the rich-text body when that's all Messages stored.
+    /// Search several conversations at once, newest first. Plain-text
+    /// messages are matched in SQL; messages whose text is stored only as
+    /// rich text are decoded first and then matched (the raw stored bytes
+    /// can't be searched reliably).
     func search(_ text: String, inChats chats: [Int64], limit: Int = 200) throws -> [(chat: Int64, message: ChatMessage)] {
         let q = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, !chats.isEmpty else { return [] }
@@ -234,7 +244,7 @@ actor ChatDBReader {
             .replacingOccurrences(of: "%", with: "\\%").replacingOccurrences(of: "_", with: "\\_")
         let pattern = "%\(escaped)%"
         let placeholders = Array(repeating: "?", count: chats.count).joined(separator: ",")
-        let sql = """
+        let columns = """
             SELECT m.ROWID, m.text, m.attributedBody, m.is_from_me, m.date,
                    COALESCE(h.id, ''), m.cache_has_attachments, m.guid, cmj.chat_id
               FROM message m
@@ -242,28 +252,48 @@ actor ChatDBReader {
             LEFT JOIN handle h ON h.ROWID = m.handle_id
              WHERE cmj.chat_id IN (\(placeholders))
                AND m.associated_message_guid IS NULL
-               AND (m.text LIKE ? ESCAPE '\\' OR (m.text IS NULL AND m.attributedBody LIKE ? ESCAPE '\\'))
-             ORDER BY m.date DESC
-             LIMIT ?
             """
-        let rows: [(Int64, ChatMessage)] = try query(sql, bind: { stmt in
-            var i: Int32 = 1
-            for c in chats { sqlite3_bind_int64(stmt, i, c); i += 1 }
-            sqlite3_bind_text(stmt, i, pattern, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self)); i += 1
-            sqlite3_bind_text(stmt, i, pattern, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self)); i += 1
-            sqlite3_bind_int64(stmt, i, Int64(limit * 2))
-        }) { stmt in
-            var body = columnString(stmt, 1)
-            if (body ?? "").isEmpty, let blob = columnBlob(stmt, 2) { body = AttributedBodyParser.string(from: blob) }
-            guard let body, body.localizedCaseInsensitiveContains(q) else { return nil }
-            let fromMe = columnInt64(stmt, 3) != 0
-            return (columnInt64(stmt, 8), ChatMessage(
-                id: columnInt64(stmt, 0), text: body, isFromMe: fromMe,
+        func row(_ stmt: OpaquePointer?, body: String) -> (Int64, ChatMessage) {
+            (columnInt64(stmt, 8), ChatMessage(
+                id: columnInt64(stmt, 0), text: body, isFromMe: columnInt64(stmt, 3) != 0,
                 date: ChatMessage.dateFromAppleTimestamp(columnInt64(stmt, 4)),
                 handleId: columnString(stmt, 5) ?? "", guid: columnString(stmt, 7) ?? ""
             ))
         }
-        return Array(rows.prefix(limit)).map { (chat: $0.0, message: $0.1) }
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+        // 1. Plain text: SQL does the matching.
+        var hits: [(Int64, ChatMessage)] = try query(columns + " AND m.text LIKE ? ESCAPE '\\' ORDER BY m.date DESC LIMIT ?", bind: { stmt in
+            var i: Int32 = 1
+            for c in chats { sqlite3_bind_int64(stmt, i, c); i += 1 }
+            sqlite3_bind_text(stmt, i, pattern, -1, transient); i += 1
+            sqlite3_bind_int64(stmt, i, Int64(limit))
+        }) { stmt in
+            guard let body = columnString(stmt, 1), body.localizedCaseInsensitiveContains(q) else { return nil }
+            return row(stmt, body: body)
+        }
+
+        // 2. Rich text only: decode (once per session), then match.
+        var cache = decodedText
+        let rich: [(Int64, ChatMessage)] = try query(columns + " AND (m.text IS NULL OR m.text = '') AND m.attributedBody IS NOT NULL", bind: { stmt in
+            var i: Int32 = 1
+            for c in chats { sqlite3_bind_int64(stmt, i, c); i += 1 }
+        }) { stmt in
+            let id = columnInt64(stmt, 0)
+            let body: String
+            if let known = cache[id] {
+                body = known
+            } else {
+                guard let blob = columnBlob(stmt, 2) else { return nil }
+                body = AttributedBodyParser.string(from: blob) ?? ""
+                cache[id] = body
+            }
+            guard body.localizedCaseInsensitiveContains(q) else { return nil }
+            return row(stmt, body: body)
+        }
+        decodedText = cache
+        hits.append(contentsOf: rich)
+        return Array(hits.sorted { $0.1.date > $1.1.date }.prefix(limit)).map { (chat: $0.0, message: $0.1) }
     }
 
     /// Attachments in a conversation, by message ROWID. Skips link-preview

@@ -5,6 +5,8 @@ import SwiftUI
 /// The notification choices — used in Settings and in first-time setup.
 struct NotificationOptions: View {
     @Bindable var settings: AppSettings
+    /// Called when anything that affects scheduled reminders changes.
+    var onChange: () -> Void = {}
     @State private var testResult: String?
     @Environment(\.openURL) private var openURL
 
@@ -15,6 +17,9 @@ struct NotificationOptions: View {
 
     var body: some View {
         Toggle("Allow notifications from Weft", isOn: $settings.notifyBanners)
+            .onChange(of: settings.notifyBanners) { _, _ in onChange() }
+            .onChange(of: settings.notifyHidePreviews) { _, _ in onChange() }
+            .onChange(of: settings.notifySound) { _, _ in onChange() }
         HStack {
             Picker("Sound", selection: $settings.notifySound) {
                 Text("Default").tag("default")

@@ -19,6 +19,10 @@ final class BackgroundSorter {
     var onChange: (() -> Void)?
     /// Conversation being filed right now (for the queue).
     private(set) var working: Int64?
+    /// Updates a conversation's reminders (tests replace this).
+    var reminderSync: (_ loops: [OpenLoop], _ chat: Int64, _ name: String, _ settings: AppSettings) -> Void = { loops, chat, name, settings in
+        Notifier.shared.syncReminders(loops: loops, chat: chat, conversationName: name, settings: settings)
+    }
     /// Display names for banners.
     var conversationName: (Int64) -> String = { _ in "Messages" }
     private var running = false
@@ -41,11 +45,13 @@ final class BackgroundSorter {
         onChange?()
     }
 
-    private func run(settings: AppSettings, openChat: @MainActor () -> Int64?) async {
+    /// Which database to read (tests use a fixture).
+    var reader: ChatDBReader = .shared
+
+    func run(settings: AppSettings, openChat: @MainActor () -> Int64?) async {
         guard !running else { return }
         running = true
         defer { running = false }
-        let reader = ChatDBReader.shared
         for chat in settings.followedChats where chat != openChat() {
             // New-message count, and a banner for anything not yet announced.
             let viewed = settings.lastViewedRowID(chat: chat)
@@ -71,9 +77,10 @@ final class BackgroundSorter {
         guard settings.hasConsent(chat),
               var saved = SegmentationCache.load(chatId: chat), !saved.topics.isEmpty,
               var client = settings.makeClient() else { return }
-        let reader = ChatDBReader.shared
-        guard var fresh = try? await reader.fetchMessages(chatRowID: chat, after: saved.newestRowId),
-              !fresh.isEmpty else { return }
+        guard let waiting = try? await reader.fetchMessages(chatRowID: chat, after: saved.newestRowId),
+              !waiting.isEmpty else { return }
+        // Same size limits as the open conversation; the rest go next pass.
+        var fresh = WeftViewModel.batch(waiting, local: settings.provider?.isLocal ?? false)
         fresh = fresh.map { var m = $0; m.senderName = Self.senderName(m); return m }
 
         let byActivity = saved.topics.sorted { ($0.messageIds.max() ?? 0) > ($1.messageIds.max() ?? 0) }
@@ -130,6 +137,8 @@ final class BackgroundSorter {
         // Opened while we were working? The open view owns it now.
         guard openChat() != chat else { return }
         try? SegmentationCache.save(saved, chatId: chat)
+        // New or settled follow-ups: keep their reminders in step.
+        reminderSync(saved.loops, chat, conversationName(chat), settings)
     }
 
     static func senderName(_ m: ChatMessage) -> String {

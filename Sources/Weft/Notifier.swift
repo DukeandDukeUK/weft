@@ -84,7 +84,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// date. Replaces this conversation's earlier ones. Removal and adding
     /// happen together, and only for the newest sync, so a slow older sync
     /// can't delete the reminders a newer one just added.
+    /// Tests watch reminder syncs through this.
+    nonisolated(unsafe) static var syncObserver: ((_ chat: Int64, _ loops: [OpenLoop]) -> Void)?
+
     func syncReminders(loops: [OpenLoop], chat: Int64, conversationName: String, settings: AppSettings) {
+        Self.syncObserver?(chat, loops)
         guard let center else { return }
         let generation = (reminderGeneration[chat] ?? 0) + 1
         reminderGeneration[chat] = generation

@@ -162,13 +162,15 @@ struct TopicFiler: Sendable {
             let start = max(0, a.start)
             let end = min(a.end, newMessages.count - 1)
             guard start <= end else { continue }
+            let validTopic = a.topic.flatMap { (0..<topics.count).contains($0) ? $0 : nil }
+            let title = (a.newTitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            // A range with neither a valid topic nor a title is unusable —
+            // check that BEFORE claiming its messages, so a bad assignment
+            // can't block a good one for the same messages.
+            guard validTopic != nil || !title.isEmpty else { continue }
             let indices = (start...end).filter { !claimed.contains($0) }
             guard !indices.isEmpty else { continue }
             claimed.formUnion(indices)
-            let validTopic = a.topic.flatMap { (0..<topics.count).contains($0) ? $0 : nil }
-            let title = (a.newTitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            // A range with neither a valid topic nor a title is unusable.
-            guard validTopic != nil || !title.isEmpty else { continue }
             assignments.append(Assignment(
                 messageIds: indices.map { newMessages[$0].id },
                 topicIndex: validTopic,

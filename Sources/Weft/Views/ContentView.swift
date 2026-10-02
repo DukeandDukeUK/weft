@@ -76,7 +76,7 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $viewModel.showNotificationSetup) {
-            NotificationSetupView(settings: viewModel.settings) { viewModel.updateBadge() }
+            NotificationSetupView(settings: viewModel.settings) { viewModel.updateBadge(); viewModel.resyncAllReminders() }
         }
     }
 }
@@ -128,7 +128,7 @@ struct FirstSortView: View {
                             : "The newest \(firstPart) of \(total) messages" + (settings.sortOlderHistory ? ", then the older ones in the background" : "")))
                 }
             }
-            Text("After this, only new messages are sent, a few at a time, as they arrive.")
+            Text("New messages are sorted automatically. Older history is also processed when enabled (Settings → Sorting, or right-click the conversation → Skip Older History).")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack {
@@ -189,7 +189,7 @@ struct QueueButton: View {
                             }
                         }
                     }
-                    Text("Right-click a conversation to pause its sorting or skip older history.")
+                    Text("Right-click a conversation to pause its sorting, or Skip Older History so only new messages are sorted.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }

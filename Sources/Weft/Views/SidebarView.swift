@@ -48,7 +48,7 @@ struct SidebarView: View {
                         Button(viewModel.isPaused(chat.id) ? "Resume Sorting" : "Pause Sorting") {
                             viewModel.setPaused(chat.id, !viewModel.isPaused(chat.id))
                         }
-                        Toggle("Recent Messages Only", isOn: Binding(
+                        Toggle("Skip Older History", isOn: Binding(
                             get: { viewModel.settings.recentOnlyChats.contains(chat.id) },
                             set: { viewModel.setRecentOnly(chat.id, $0) }
                         ))

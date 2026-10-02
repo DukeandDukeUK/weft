@@ -600,6 +600,13 @@ final class WeftViewModel {
         let before = topics
         let after = change(before)
         guard after != before else { return }
+        // Messages you placed by hand are filed: take them out of the
+        // waiting list so a sort already in progress can't move them back.
+        let placement = { (ts: [Topic]) in Dictionary(ts.flatMap { t in t.messageIds.map { ($0, t.id) } }, uniquingKeysWith: { a, _ in a }) }
+        let was = placement(before), now = placement(after)
+        let movedByHand = Set(now.compactMap { id, topic in was[id] != topic ? id : nil })
+        pendingMessageIDs.subtract(movedByHand)
+        for id in movedByHand { provisionalTopic[id] = nil }
         applyEdit(after, chat: chat)
         registerEditUndo(actionName, undoManager: undoManager, chat: chat, target: before, applied: topics)
     }
@@ -1075,14 +1082,18 @@ final class WeftViewModel {
             }.filter { !$0.messageIds.isEmpty }
             var filed = Set<Int64>()
             for a in result.assignments {
+                // Only messages still waiting: one you moved by hand while
+                // this was running stays where you put it.
+                let stillWaiting = a.messageIds.filter { pendingMessageIDs.contains($0) }
+                guard !stillWaiting.isEmpty else { continue }
                 if let i = a.topicIndex,
                    let target = base.firstIndex(where: { $0.id == candidates[i].id }) {
-                    base[target].messageIds.append(contentsOf: a.messageIds)
+                    base[target].messageIds.append(contentsOf: stillWaiting)
                     if let s = a.updatedSummary, !s.isEmpty { base[target].summary = s }
                 } else {
-                    base.append(Topic(id: UUID(), title: a.newTitle, summary: a.newSummary, messageIds: a.messageIds))
+                    base.append(Topic(id: UUID(), title: a.newTitle, summary: a.newSummary, messageIds: stillWaiting))
                 }
-                filed.formUnion(a.messageIds)
+                filed.formUnion(stillWaiting)
             }
             for i in base.indices { base[i].messageIds.sort() }
 
@@ -1193,6 +1204,16 @@ final class WeftViewModel {
     func snooze(_ loop: OpenLoop, until date: Date) {
         updateLoop(loop.id) { $0.snoozedUntil = date }
         if sidebarSelection == .loop(loop.id) { sidebarSelection = .all }
+    }
+
+    /// Notification settings changed (allow / hide text / sound): rebuild
+    /// or cancel every conversation's scheduled reminders, not just this one.
+    func resyncAllReminders() {
+        for chat in settings.followedChats {
+            let chatLoops = chat == settings.selectedChatRowID ? loops : (SegmentationCache.load(chatId: chat)?.loops ?? [])
+            let name = chats.first { $0.id == chat }.map { ContactNames.shared.shortDisplay($0.participants) } ?? "Weft"
+            Notifier.shared.syncReminders(loops: chatLoops, chat: chat, conversationName: name, settings: settings)
+        }
     }
 
     /// Keep this conversation's reminder notifications in step with its
