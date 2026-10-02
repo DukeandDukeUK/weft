@@ -137,6 +137,19 @@ struct SettingsView: View {
 
 struct ChatPickerView: View {
     @Bindable var viewModel: WeftViewModel
+    @State private var pickerQuery = ""
+
+    private var filteredChats: [ChatInfo] {
+        let q = pickerQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return viewModel.chats }
+        let digits = q.filter(\.isNumber)
+        return viewModel.chats.filter { chat in
+            ContactNames.shared.shortDisplay(chat.participants).localizedCaseInsensitiveContains(q)
+                || chat.participants.localizedCaseInsensitiveContains(q)
+                || (digits.count >= 3 && chat.participants.filter(\.isNumber).contains(digits))
+                || (chat.lastSnippet ?? "").localizedCaseInsensitiveContains(q)
+        }
+    }
     @Environment(\.dismiss) private var dismiss
 
     private static let dateFormatter: DateFormatter = {
@@ -170,7 +183,11 @@ struct ChatPickerView: View {
                     .foregroundStyle(.secondary)
                     .padding()
             } else {
-                List(viewModel.chats) { chat in
+                TextField("Search by name, number or message", text: $pickerQuery)
+                    .textFieldStyle(.roundedBorder)
+                    .padding(.horizontal)
+                    .padding(.bottom, 6)
+                List(filteredChats) { chat in
                     Button {
                         Task { await viewModel.selectChat(chat) }
                         dismiss()

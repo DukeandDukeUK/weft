@@ -21,6 +21,9 @@ struct ContentView: View {
                 }
             }
             ToolbarItem(placement: .primaryAction) {
+                QueueButton(viewModel: viewModel)
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Menu {
                     Button("Add Conversation…", systemImage: "plus") { viewModel.showChatPicker = true }
                     Divider()
@@ -53,7 +56,7 @@ struct ContentView: View {
         .confirmationDialog("Re-sort this whole conversation?", isPresented: $confirmResort) {
             Button("Re-sort Everything") { Task { await viewModel.analyze() } }
         } message: {
-            Text("Not needed day to day — new messages are sorted automatically. This rebuilds every topic from scratch and uses more of your AI plan than normal sorting.")
+            Text("Not needed day to day — new messages are sorted automatically. This rebuilds every topic from scratch — replacing any renames, merges or moves you made — and uses more of your AI plan than normal sorting.")
         }
         .onReceive(NotificationCenter.default.publisher(for: .weftSelectConversation)) { note in
             if let n = note.userInfo?["index"] as? Int, viewModel.followedChats.indices.contains(n) {
@@ -68,7 +71,8 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .weftOpenConversation)) { note in
             if let id = note.userInfo?["chat"] as? Int64 {
-                Task { await viewModel.openConversation(id) }
+                let loop = (note.userInfo?["loop"] as? String).flatMap(UUID.init(uuidString:))
+                Task { await viewModel.openConversation(id, loop: loop) }
             }
         }
         .sheet(isPresented: $viewModel.showNotificationSetup) {
@@ -151,6 +155,45 @@ struct FirstSortView: View {
         case .gemini: return "Google (Gemini)"
         case .grok: return "xAI (Grok)"
         case .ollama, .lmstudio: return "this Mac"
+        }
+    }
+}
+
+// MARK: - QueueButton
+
+/// Shows what Weft is working on (only when something is going on).
+struct QueueButton: View {
+    @Bindable var viewModel: WeftViewModel
+    @State private var showing = false
+
+    var body: some View {
+        let items = viewModel.queue
+        if !items.isEmpty {
+            Button {
+                showing.toggle()
+            } label: {
+                Label("Activity (\(items.count))", systemImage: "list.bullet.rectangle")
+            }
+            .help("What Weft is working on")
+            .popover(isPresented: $showing, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Activity").font(.headline)
+                    ForEach(items) { item in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: item.symbol).foregroundStyle(WeftStyle.accent).frame(width: 18)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(item.conversation).font(.callout.weight(.medium))
+                                Text(item.status).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    Text("Right-click a conversation to pause its sorting or skip older history.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(14)
+                .frame(width: 300)
+            }
         }
     }
 }

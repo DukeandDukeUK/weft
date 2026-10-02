@@ -225,6 +225,74 @@ actor ChatDBReader {
         return newest != nil ? rows.reversed() : rows
     }
 
+    /// Search several conversations at once, newest first. Matches the
+    /// text column, or the rich-text body when that's all Messages stored.
+    func search(_ text: String, inChats chats: [Int64], limit: Int = 200) throws -> [(chat: Int64, message: ChatMessage)] {
+        let q = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty, !chats.isEmpty else { return [] }
+        let escaped = q.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%", with: "\\%").replacingOccurrences(of: "_", with: "\\_")
+        let pattern = "%\(escaped)%"
+        let placeholders = Array(repeating: "?", count: chats.count).joined(separator: ",")
+        let sql = """
+            SELECT m.ROWID, m.text, m.attributedBody, m.is_from_me, m.date,
+                   COALESCE(h.id, ''), m.cache_has_attachments, m.guid, cmj.chat_id
+              FROM message m
+              JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+            LEFT JOIN handle h ON h.ROWID = m.handle_id
+             WHERE cmj.chat_id IN (\(placeholders))
+               AND m.associated_message_guid IS NULL
+               AND (m.text LIKE ? ESCAPE '\\' OR (m.text IS NULL AND m.attributedBody LIKE ? ESCAPE '\\'))
+             ORDER BY m.date DESC
+             LIMIT ?
+            """
+        let rows: [(Int64, ChatMessage)] = try query(sql, bind: { stmt in
+            var i: Int32 = 1
+            for c in chats { sqlite3_bind_int64(stmt, i, c); i += 1 }
+            sqlite3_bind_text(stmt, i, pattern, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self)); i += 1
+            sqlite3_bind_text(stmt, i, pattern, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self)); i += 1
+            sqlite3_bind_int64(stmt, i, Int64(limit * 2))
+        }) { stmt in
+            var body = columnString(stmt, 1)
+            if (body ?? "").isEmpty, let blob = columnBlob(stmt, 2) { body = AttributedBodyParser.string(from: blob) }
+            guard let body, body.localizedCaseInsensitiveContains(q) else { return nil }
+            let fromMe = columnInt64(stmt, 3) != 0
+            return (columnInt64(stmt, 8), ChatMessage(
+                id: columnInt64(stmt, 0), text: body, isFromMe: fromMe,
+                date: ChatMessage.dateFromAppleTimestamp(columnInt64(stmt, 4)),
+                handleId: columnString(stmt, 5) ?? "", guid: columnString(stmt, 7) ?? ""
+            ))
+        }
+        return Array(rows.prefix(limit)).map { (chat: $0.0, message: $0.1) }
+    }
+
+    /// Attachments in a conversation, by message ROWID. Skips link-preview
+    /// data and attachments Messages itself hides.
+    func fetchAttachments(chatRowID: Int64, after: Int64 = 0) throws -> [Int64: [Attachment]] {
+        let sql = """
+            SELECT maj.message_id, a.ROWID, a.filename, COALESCE(a.mime_type, ''),
+                   COALESCE(a.transfer_name, ''), COALESCE(a.total_bytes, 0)
+              FROM attachment a
+              JOIN message_attachment_join maj ON maj.attachment_id = a.ROWID
+              JOIN chat_message_join cmj ON cmj.message_id = maj.message_id
+             WHERE cmj.chat_id = ? AND maj.message_id > ?
+               AND COALESCE(a.hide_attachment, 0) = 0
+               AND a.filename IS NOT NULL
+               AND a.filename NOT LIKE '%.pluginPayloadAttachment'
+            """
+        let home = NSHomeDirectory()
+        let rows: [(Int64, Attachment)] = try query(sql, bind: { stmt in
+            sqlite3_bind_int64(stmt, 1, chatRowID)
+            sqlite3_bind_int64(stmt, 2, after)
+        }) { stmt in
+            guard let raw = columnString(stmt, 2) else { return nil }
+            let path = raw.hasPrefix("~") ? home + raw.dropFirst() : raw
+            let name = columnString(stmt, 4).flatMap { $0.isEmpty ? nil : $0 } ?? (path as NSString).lastPathComponent
+            return (columnInt64(stmt, 0), Attachment(id: columnInt64(stmt, 1), path: path, mime: columnString(stmt, 3) ?? "", name: name, bytes: columnInt64(stmt, 5)))
+        }
+        return Dictionary(grouping: rows, by: \.0).mapValues { $0.map(\.1) }
+    }
+
     /// Newest real message (not a reaction) in a conversation — for the
     /// "new messages" dot on conversations you aren't looking at.
     func latestMessageRowID(chatRowID: Int64) throws -> Int64 {

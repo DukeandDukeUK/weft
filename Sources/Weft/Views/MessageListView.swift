@@ -4,6 +4,9 @@ import SwiftUI
 
 struct MessageListView: View {
     @Bindable var viewModel: WeftViewModel
+    @Environment(\.undoManager) private var undoManager
+    @State private var newTopicFor: Int64?
+    @State private var newTopicName = ""
     /// True while the view is scrolled to (or near) the newest message.
     /// New messages only auto-scroll in that case, like Messages.app.
     @State private var atBottom = true
@@ -33,6 +36,7 @@ struct MessageListView: View {
                                 ? message.senderName : nil
                         )
                         .id(message.id)
+                        .contextMenu { messageMenu(message) }
                     }
                 }
                 .padding(.horizontal, 20)
@@ -74,11 +78,55 @@ struct MessageListView: View {
             }
             .onChange(of: jumpTarget) { _, _ in jumpIfNeeded(proxy) }
         }
+        .alert("Move to New Topic", isPresented: Binding(get: { newTopicFor != nil }, set: { if !$0 { newTopicFor = nil } })) {
+            TextField("Topic name", text: $newTopicName)
+            Button("Move") {
+                if let id = newTopicFor {
+                    viewModel.editTopics("Move to New Topic", undoManager: undoManager) {
+                        TopicEditor.moveToNew($0, messages: [id], title: newTopicName).topics
+                    }
+                }
+                newTopicFor = nil
+            }
+            Button("Cancel", role: .cancel) { newTopicFor = nil }
+        }
         // A fresh scroll view per thread, so each one opens at the bottom.
         .id(viewModel.sidebarSelection)
     }
 
     private static let bottomID = "bottom-marker"
+
+    /// Right-click a message: move it, split the topic, copy, open in Messages.
+    @ViewBuilder
+    private func messageMenu(_ message: ChatMessage) -> some View {
+        let current = viewModel.topics.first { $0.messageIds.contains(message.id) }
+        Menu("Move to Topic") {
+            ForEach(viewModel.topics.filter { $0.id != current?.id }) { topic in
+                Button(topic.title) {
+                    viewModel.editTopics("Move Message", undoManager: undoManager) {
+                        TopicEditor.move($0, messages: [message.id], to: topic.id)
+                    }
+                }
+            }
+        }
+        Button("Move to New Topic…") {
+            newTopicName = ""
+            newTopicFor = message.id
+        }
+        if let topic = viewModel.selectedTopic, topic.messageIds.first != message.id {
+            Button("Split Topic Here") {
+                viewModel.editTopics("Split Topic", undoManager: undoManager) {
+                    TopicEditor.split($0, topic.id, from: message.id, newTitle: topic.title + " (continued)").topics
+                }
+            }
+        }
+        Divider()
+        Button("Open in Messages") { viewModel.openInMessages() }
+        Button("Copy Text") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(message.text, forType: .string)
+        }
+    }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, lastID: Int64?, animated: Bool) {
         guard lastID != nil else { return }
@@ -134,15 +182,21 @@ struct MessageRow: View {
                         .foregroundStyle(.secondary)
                         .padding(.leading, 12)
                 }
-                Text(message.text)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
-                    .background(message.isFromMe ? WeftStyle.myBubble : WeftStyle.theirBubble,
-                                in: RoundedRectangle(cornerRadius: WeftStyle.bubbleRadius, style: .continuous))
-                    // Solid black/white in their bubbles: macOS's normal text
-                    // color is slightly see-through and loses contrast on gray.
-                    .foregroundStyle(message.isFromMe ? Color.white : WeftStyle.theirText)
+                VStack(alignment: message.isFromMe ? .trailing : .leading, spacing: 4) {
+                    ForEach(message.attachments) { AttachmentView(attachment: $0) }
+                    // A photo-only message has placeholder text; don't show it.
+                    if message.attachments.isEmpty || message.text != "[attachment]" {
+                        Text(message.text)
+                            .textSelection(.enabled)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 9)
+                            .background(message.isFromMe ? WeftStyle.myBubble : WeftStyle.theirBubble,
+                                        in: RoundedRectangle(cornerRadius: WeftStyle.bubbleRadius, style: .continuous))
+                            // Solid black/white in their bubbles: macOS's normal text
+                            // color is slightly see-through and loses contrast on gray.
+                            .foregroundStyle(message.isFromMe ? Color.white : WeftStyle.theirText)
+                    }
+                }
                     // Reactions sit on the bubble's own top corner, like
                     // Messages (attached before the width limit, so they
                     // follow the bubble, not the column).

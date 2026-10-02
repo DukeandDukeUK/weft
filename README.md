@@ -12,7 +12,11 @@ If you text an AI assistant (or your boss, or the family group) about everything
 - **Group chats.** Each message shows who sent it, and the sorting knows who said what. Replies go to the whole group — including groups with Android members, sent as regular texts through your iPhone (turn on Text Message Forwarding).
 - **Reply inside a topic.** Your reply is sent through Messages as you, and Weft shows who it goes to. It starts with "Re: <topic> —", so other participants know which subject you mean (you can turn this off).
 - **Follow-ups.** Weft keeps a list of requests that haven't been answered yet and promises that haven't been kept, and checks them off when they're done.
-- **Search** across the whole conversation.
+- **Fix topics by hand.** Right-click to rename or merge topics, move a message to another topic, or split a topic — with Undo (⌘Z).
+- **Follow-up owners, due dates and reminders.** Follow-ups are split into *Owed by me* and *Waiting on them*, can have a due date or be snoozed, and Weft reminds you with a notification. Each links back to the message it came from.
+- **Per-conversation controls.** Right-click a conversation to pause its sorting or keep it to recent messages only; the Activity button shows what Weft is working on.
+- **Search** one conversation or all of them, and search the conversation picker by name, number or message.
+- **Photos and files** show in the conversation (click to open). Right-click → **Open in Messages**.
 - **Reactions** (❤️ 👍 ✅ …) show on messages just like in Messages, including several people's in a group — click them to see who reacted.
 - **Contact names** next to phone numbers, if you allow Contacts access.
 - **Notifications.** A red count on Weft's Dock icon and next to each conversation, plus optional notifications with a sound you pick. Clicking one opens that conversation.

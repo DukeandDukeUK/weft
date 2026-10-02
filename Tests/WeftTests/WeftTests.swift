@@ -146,4 +146,83 @@ final class WeftTests: XCTestCase {
         XCTAssertTrue(vm.settings.consentedChats.contains(404))
         vm.settings.consentedChats.remove(404)
     }
+
+    // MARK: - 0.2.0 features
+
+    func testTopicEditing() {
+        let a = Topic(id: UUID(), title: "Flight", summary: "", messageIds: [1, 2, 3, 4])
+        let b = Topic(id: UUID(), title: "Dentist", summary: "", messageIds: [5, 6])
+        var t = TopicEditor.rename([a, b], a.id, to: "  Denver trip ")
+        XCTAssertEqual(t.first { $0.id == a.id }?.title, "Denver trip")
+        t = TopicEditor.move([a, b], messages: [2], to: b.id)
+        XCTAssertEqual(t.first { $0.id == b.id }?.messageIds, [2, 5, 6])
+        XCTAssertEqual(t.first { $0.id == a.id }?.messageIds, [1, 3, 4])
+        t = TopicEditor.merge([a, b], b.id, into: a.id)
+        XCTAssertEqual(t.count, 1)
+        XCTAssertEqual(t[0].messageIds, [1, 2, 3, 4, 5, 6])
+        let split = TopicEditor.split([a, b], a.id, from: 3, newTitle: "Flight (continued)")
+        XCTAssertEqual(split.topics.first { $0.id == a.id }?.messageIds, [1, 2])
+        XCTAssertEqual(split.topics.first { $0.id == split.newID }?.messageIds, [3, 4])
+        // Splitting at the first message would just rename: refused.
+        XCTAssertNil(TopicEditor.split([a, b], a.id, from: 1, newTitle: "x").newID)
+        // Moving a topic's last message out removes the empty topic.
+        XCTAssertEqual(TopicEditor.move([a, b], messages: [5, 6], to: a.id).count, 1)
+    }
+
+    func testTopicEditUndoAndRedo() {
+        let vm = WeftViewModel()
+        vm.settings.selectedChatRowID = 505
+        let a = Topic(id: UUID(), title: "Flight", summary: "", messageIds: [1, 2])
+        vm.topics = [a]
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        undo.beginUndoGrouping()
+        vm.editTopics("Rename Topic", undoManager: undo) { TopicEditor.rename($0, a.id, to: "Denver") }
+        undo.endUndoGrouping()
+        XCTAssertEqual(vm.topics[0].title, "Denver")
+        undo.undo()
+        XCTAssertEqual(vm.topics[0].title, "Flight")
+        undo.redo()
+        XCTAssertEqual(vm.topics[0].title, "Denver")
+        XCTAssertEqual(SegmentationCache.load(chatId: 505)?.topics.first?.title, "Denver", "edits are saved")
+    }
+
+    func testFollowUpOwnerAndDueDateFromAI() throws {
+        let raw = #"{"assignments":[{"start":0,"end":1,"topic":0}],"newLoops":[{"title":"Send the deck","detail":"You promised the deck","message":0,"owner":"me","due":"2026-10-09"},{"title":"Hold flight","detail":"They'll hold it","message":1,"owner":"them"}],"resolvedLoops":[]}"#
+        let r = try TopicFiler.parse(raw, newMessages: [msg(1, "I'll send the deck by Friday", me: true), msg(2, "I'll hold the flight")],
+                                     topics: [Topic(id: UUID(), title: "Work", summary: "", messageIds: [0])], openLoops: [])
+        XCTAssertEqual(r.newLoops.first { $0.title == "Send the deck" }?.owner, .me)
+        XCTAssertEqual(r.newLoops.first { $0.title == "Hold flight" }?.owner, .them)
+        let due = try XCTUnwrap(r.newLoops.first { $0.title == "Send the deck" }?.dueDate)
+        let parts = Calendar.current.dateComponents([.year, .month, .day, .hour], from: due)
+        XCTAssertEqual([parts.year, parts.month, parts.day, parts.hour], [2026, 10, 9, 9])
+    }
+
+    func testSnoozeAndOverdue() {
+        let now = Date()
+        var loop = OpenLoop(id: UUID(), title: "x", detail: "", status: .open, createdDate: now)
+        loop.snoozedUntil = now.addingTimeInterval(3600)
+        XCTAssertTrue(loop.isSnoozed(at: now))
+        XCTAssertFalse(loop.isSnoozed(at: now.addingTimeInterval(7200)), "snooze ends")
+        loop.dueDate = now.addingTimeInterval(-3 * 86_400)
+        XCTAssertTrue(loop.isOverdue(at: now))
+        loop.status = .resolved
+        XCTAssertFalse(loop.isOverdue(at: now), "done items are never overdue")
+    }
+
+    func testPausedConversationSendsNothing() async throws {
+        var calls = 0
+        LLMClient.testResponder = { _, _ in calls += 1; return #"{"assignments":[]}"# }
+        let vm = WeftViewModel()
+        vm.settings.selectedChatRowID = 606
+        vm.settings.pausedChats.insert(606)
+        defer { vm.settings.pausedChats.remove(606) }
+        vm.messages = [msg(1), msg(2)]
+        vm.topics = [Topic(id: UUID(), title: "A", summary: "", messageIds: [1])]
+        vm.pendingMessageIDs = [2]
+        vm.retryFiling()
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(calls, 0, "a paused conversation was sent to the AI")
+        XCTAssertEqual(vm.pendingMessageIDs, [2], "the new message should still be waiting")
+    }
 }

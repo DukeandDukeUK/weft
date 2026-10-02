@@ -10,6 +10,8 @@ struct OpenLoopDetector: Sendable {
         let detail: String
         /// Transcript index of the message the loop comes from.
         let message: Int?
+        let owner: String?
+        let due: String?
     }
 
     let client: LLMClient
@@ -18,15 +20,19 @@ struct OpenLoopDetector: Sendable {
         let (numbered, transcript) = TopicSegmenter.buildTranscript(messages: messages, maxTotalChars: client.transcriptCharLimit)
         let system = """
             You are reviewing a chat transcript between a person ("You") and one or more others (each line is labeled with who sent it; often an AI assistant).
-            Find OPEN LOOPS:
-            (a) requests or questions from You with no confirmed resolution later in the transcript;
-            (b) promises, commitments, or "I'll follow up / I'll handle it" statements from the others with no confirmed completion.
+            Find FOLLOW-UPS — things not yet finished:
+            (a) requests or questions from You with no confirmed resolution later in the transcript ("owner": "them");
+            (b) promises, commitments, or "I'll follow up / I'll handle it" statements from the others with no confirmed completion ("owner": "them");
+            (c) requests from the others to You that You haven't done yet ("owner": "me");
+            (d) promises You made that aren't confirmed done ("owner": "me").
             Ignore anything clearly finished. When unsure whether something resolved, include it.
             Return ONLY a JSON array — no markdown fences, no commentary — of objects with keys:
             "title": short title, 6 words max
             "detail": one or two sentences — what is pending and the last known state
             "message": the [index] of the message where it was asked or promised
-            If there are no open loops, return [].
+            "owner": "them" or "me" as above
+            "due": "YYYY-MM-DD" only if a date or deadline is stated (resolve words like "Friday" using the message dates), otherwise omit
+            If there are none, return [].
             """
         let raw = try await client.complete(systemPrompt: system, userPrompt: transcript, purpose: .openLoops)
         // An unreadable reply is an error, not "nothing outstanding".
@@ -44,7 +50,9 @@ struct OpenLoopDetector: Sendable {
                     detail: dto.detail.trimmingCharacters(in: .whitespacesAndNewlines),
                     status: .open,
                     createdDate: now,
-                    sourceMessageId: dto.message.flatMap { numbered.indices.contains($0) ? numbered[$0].id : nil }
+                    sourceMessageId: dto.message.flatMap { numbered.indices.contains($0) ? numbered[$0].id : nil },
+                    owner: LoopOwner.parse(dto.owner),
+                    dueDate: DueDateParser.parse(dto.due)
                 )
             }
             .filter { !$0.title.isEmpty }

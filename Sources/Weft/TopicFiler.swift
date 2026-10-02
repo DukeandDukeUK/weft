@@ -58,6 +58,8 @@ struct TopicFiler: Sendable {
         let detail: String
         /// Index of the NEW message the loop comes from.
         let message: Int?
+        let owner: String?
+        let due: String?
     }
 
     /// A resolved loop, written as 3, "L3", or (older replies) its title.
@@ -133,9 +135,11 @@ struct TopicFiler: Sendable {
                "summary": a new one-sentence summary for Tk if these messages change its outcome; or
                {"start": i, "end": j, "newTitle": "...", "newSummary": "..."} to start a new topic
                (title 6 words max, specific; summary one sentence).
-            "newLoops": array of {"title", "detail", "message"} for requests from You with no resolution yet, or promises from
-               the others not yet completed, that appear in the NEW messages and are not already in OPEN LOOPS.
-               "message" is the index of the NEW message it comes from. [] if none.
+            "newLoops": array of {"title", "detail", "message", "owner", "due"} for follow-ups raised in the NEW messages that
+               aren't already in OPEN LOOPS: requests from You not yet answered or promises from the others not yet kept
+               ("owner": "them"); requests from the others to You or promises You made, not yet done ("owner": "me").
+               "message" is the index of the NEW message it comes from. "due": "YYYY-MM-DD" only if a date or deadline is
+               stated (resolve words like "Friday" from the message dates), otherwise omit. [] if none.
             "resolvedLoops": array of OPEN LOOPS numbers (e.g. 2 for L2) that the NEW messages clearly resolve. [] if none.
             Use an existing topic when the new messages continue its subject; start a new topic only for a genuinely new subject.
             """
@@ -181,7 +185,9 @@ struct TopicFiler: Sendable {
                 detail: $0.detail.trimmingCharacters(in: .whitespacesAndNewlines),
                 status: .open,
                 createdDate: now,
-                sourceMessageId: $0.message.flatMap { newMessages.indices.contains($0) ? newMessages[$0].id : nil }
+                sourceMessageId: $0.message.flatMap { newMessages.indices.contains($0) ? newMessages[$0].id : nil },
+                owner: LoopOwner.parse($0.owner),
+                dueDate: DueDateParser.parse($0.due)
             )
         }.filter { !$0.title.isEmpty }
         var resolved: [UUID] = []

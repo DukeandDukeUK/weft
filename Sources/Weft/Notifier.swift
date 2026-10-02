@@ -22,14 +22,22 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     static let systemSounds = ["Basso", "Blow", "Bottle", "Frog", "Funk", "Glass", "Hero",
                                "Morse", "Ping", "Pop", "Purr", "Sosumi", "Submarine", "Tink"]
 
+    /// macOS notifications only exist for a real app bundle; anywhere else
+    /// (tests, command-line tools) calling them crashes, so skip them.
+    static let available = Bundle.main.bundleURL.pathExtension == "app"
+
+    /// The notification center, or nil outside the app.
+    private var center: UNUserNotificationCenter? { Self.available ? UNUserNotificationCenter.current() : nil }
+
     override private init() {
         super.init()
-        UNUserNotificationCenter.current().delegate = self
+        center?.delegate = self
     }
 
     /// Ask macOS for permission to show banners (only once; macOS remembers).
     func requestPermission() async -> Bool {
-        (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+        guard let center else { return false }
+        return (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
     }
 
     /// Don't announce anything that already existed when Weft started.
@@ -52,9 +60,38 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.sound = Self.sound(named: settings.notifySound)
         content.threadIdentifier = "chat-\(chat)"
         content.userInfo = ["chat": chat]
-        UNUserNotificationCenter.current().add(
+        center?.add(
             UNNotificationRequest(identifier: "weft-\(chat)-\(newest.id)", content: content, trigger: nil)
         )
+    }
+
+    /// Reminders for follow-ups: one per open follow-up with a due date or
+    /// snooze in the future. Replaces this conversation's earlier ones.
+    func syncReminders(loops: [OpenLoop], chat: Int64, conversationName: String, settings: AppSettings) {
+        guard let center else { return }
+        let prefix = "weft-loop-\(chat)-"
+        center.getPendingNotificationRequests { pending in
+            let stale = pending.map(\.identifier).filter { $0.hasPrefix(prefix) }
+            center.removePendingNotificationRequests(withIdentifiers: stale)
+        }
+        guard settings.notifyBanners else { return }
+        let now = Date()
+        for loop in loops where loop.status == .open {
+            let when = [loop.snoozedUntil, loop.dueDate].compactMap { $0 }.filter { $0 > now }.min()
+            guard let when else { continue }
+            let content = UNMutableNotificationContent()
+            content.title = loop.isOverdue(at: when) || loop.dueDate == when ? "Due: \(loop.title)" : "Reminder: \(loop.title)"
+            content.subtitle = conversationName
+            content.body = loop.detail
+            content.sound = Self.sound(named: settings.notifySound)
+            content.userInfo = ["chat": chat, "loop": loop.id.uuidString]
+            let parts = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: when)
+            center.add(UNNotificationRequest(
+                identifier: prefix + loop.id.uuidString,
+                content: content,
+                trigger: UNCalendarNotificationTrigger(dateMatching: parts, repeats: false)
+            ))
+        }
     }
 
     /// Settings → "Send test notification".
@@ -66,7 +103,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.title = "Weft"
         content.body = "This is how new messages will look."
         content.sound = Self.sound(named: settings.notifySound)
-        try? await UNUserNotificationCenter.current().add(
+        try? await center?.add(
             UNNotificationRequest(identifier: "weft-test-\(UUID())", content: content, trigger: nil)
         )
         return "Sent — it should appear in a moment."
@@ -114,10 +151,14 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
-        guard let chat = response.notification.request.content.userInfo["chat"] as? Int64 else { return }
+        let info = response.notification.request.content.userInfo
+        guard let chat = info["chat"] as? Int64 else { return }
+        let loop = info["loop"] as? String
         await MainActor.run {
             NSApp.activate(ignoringOtherApps: true)
-            NotificationCenter.default.post(name: .weftOpenConversation, object: nil, userInfo: ["chat": chat])
+            var payload: [String: Any] = ["chat": chat]
+            if let loop { payload["loop"] = loop }
+            NotificationCenter.default.post(name: .weftOpenConversation, object: nil, userInfo: payload)
         }
     }
 }

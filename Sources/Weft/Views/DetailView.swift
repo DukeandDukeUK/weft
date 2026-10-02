@@ -44,9 +44,11 @@ struct DetailView: View {
                     }
                     MessageListView(viewModel: viewModel)
                     VStack(spacing: 8) {
-                        if !viewModel.pendingMessageIDs.isEmpty {
+                        if let chat = viewModel.settings.selectedChatRowID, viewModel.isPaused(chat) {
+                            PausedBanner(count: viewModel.pendingMessageIDs.count) { viewModel.setPaused(chat, false) }
+                        } else if !viewModel.pendingMessageIDs.isEmpty {
                             StaleBanner(count: viewModel.pendingMessageIDs.count, failed: viewModel.topicsStale) {
-                                Task { await viewModel.analyze() }
+                                viewModel.retryFiling()
                             }
                         }
                         ComposeView(viewModel: viewModel)
@@ -129,7 +131,7 @@ struct StaleBanner: View {
                 Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
                 Text("Couldn't sort \(count) new message\(count == 1 ? "" : "s") — will retry with the next one.")
                     .font(.callout)
-                Button("Sort now", action: onReanalyze)
+                Button("Retry", action: onReanalyze)
                     .glassButton()
                     .controlSize(.small)
             } else {
@@ -142,6 +144,28 @@ struct StaleBanner: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 7)
         .glassSurface(Capsule(), tint: WeftStyle.teal.opacity(0.16))
+    }
+}
+
+// MARK: - PausedBanner
+
+struct PausedBanner: View {
+    let count: Int
+    let onResume: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "pause.circle").foregroundStyle(.secondary)
+            Text(count == 0 ? "Sorting is paused for this conversation." : "Sorting paused — \(count) new message\(count == 1 ? "" : "s") waiting.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Button("Resume", action: onResume)
+                .glassButton()
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .glassSurface(Capsule())
     }
 }
 

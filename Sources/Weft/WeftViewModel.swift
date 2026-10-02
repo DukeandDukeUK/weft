@@ -153,6 +153,17 @@ final class WeftViewModel {
         }
     }
 
+    /// Search scope: just the open conversation, or every added one.
+    var searchAllConversations = false
+
+    /// Open a search result from any conversation.
+    func jumpToMessage(_ message: ChatMessage, inChat chat: Int64) async {
+        if chat != settings.selectedChatRowID, let info = chats.first(where: { $0.id == chat }) {
+            await selectChat(info)
+        }
+        if let loaded = messages.first(where: { $0.id == message.id }) { jumpToMessage(loaded) }
+    }
+
     var searchResults: [ChatMessage] {
         let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return [] }
@@ -247,7 +258,7 @@ final class WeftViewModel {
         isLoading = true
         defer { isLoading = false }
         do {
-            messages = try await ChatDBReader.shared.fetchMessages(chatRowID: chat.id).map(Self.labeled)
+            messages = try await Self.withAttachments(ChatDBReader.shared.fetchMessages(chatRowID: chat.id).map(Self.labeled), chat: chat.id)
             lastSeenRowID = messages.last?.id ?? 0
             settings.markViewed(chat: chat.id, through: messages.map(\.id).max() ?? 0)
             lastReactionRowID = 0
@@ -318,10 +329,10 @@ final class WeftViewModel {
             let known = Set(messages.map(\.id))
             // Other added conversations get checked too (debounced).
             background.schedule(settings: settings) { [weak self] in self?.settings.selectedChatRowID }
-            let fresh = try await ChatDBReader.shared
+            let fresh = try await Self.withAttachments(ChatDBReader.shared
                 .fetchMessages(chatRowID: chatId, after: lastSeenRowID)
                 .filter { !known.contains($0.id) }
-                .map(Self.labeled)
+                .map(Self.labeled), chat: chatId, after: lastSeenRowID)
             if !fresh.isEmpty {
                 messages.append(contentsOf: fresh)
                 lastSeenRowID = max(lastSeenRowID, fresh.map(\.id).max() ?? 0)
@@ -427,6 +438,83 @@ final class WeftViewModel {
         }
     }
 
+    // MARK: - Per-conversation sorting controls
+
+    func isPaused(_ chat: Int64) -> Bool { settings.pausedChats.contains(chat) }
+
+    func setPaused(_ chat: Int64, _ paused: Bool) {
+        if paused {
+            settings.pausedChats.insert(chat)
+            if chat == settings.selectedChatRowID {
+                autoSortTask?.cancel()
+                backfillTask?.cancel()
+                backfillTask = nil
+                historyProgress = nil
+            }
+        } else {
+            settings.pausedChats.remove(chat)
+            if chat == settings.selectedChatRowID {
+                if !pendingMessageIDs.isEmpty || topics.isEmpty { scheduleAutoSort(after: 0) }
+                startHistoryBackfill()
+            }
+        }
+    }
+
+    func setRecentOnly(_ chat: Int64, _ recentOnly: Bool) {
+        if recentOnly {
+            settings.recentOnlyChats.insert(chat)
+            if chat == settings.selectedChatRowID { backfillTask?.cancel(); backfillTask = nil; historyProgress = nil }
+        } else {
+            settings.recentOnlyChats.remove(chat)
+            if chat == settings.selectedChatRowID { startHistoryBackfill() }
+        }
+    }
+
+    /// "Retry" on the new-messages banner: file them again (not a full re-sort).
+    func retryFiling() {
+        topicsStale = false
+        scheduleAutoSort(after: 0)
+    }
+
+    /// What Weft is doing right now, for the queue popover.
+    struct QueueItem: Identifiable {
+        let id = UUID()
+        let conversation: String
+        let status: String
+        let symbol: String
+    }
+
+    var queue: [QueueItem] {
+        var items: [QueueItem] = []
+        let name = selectedChat.map { ContactNames.shared.shortDisplay($0.participants) } ?? "This conversation"
+        if let chat = settings.selectedChatRowID {
+            if settings.pausedChats.contains(chat) {
+                items.append(.init(conversation: name, status: pendingMessageIDs.isEmpty ? "Sorting paused" : "Sorting paused — \(pendingMessageIDs.count) new waiting", symbol: "pause.circle"))
+            } else if firstSortRequest != nil {
+                items.append(.init(conversation: name, status: "Waiting for your OK to sort", symbol: "hand.raised"))
+            } else if isAnalyzing && topics.isEmpty {
+                items.append(.init(conversation: name, status: "First sort in progress", symbol: "arrow.triangle.2.circlepath"))
+            } else if !pendingMessageIDs.isEmpty {
+                items.append(.init(conversation: name, status: "Filing \(pendingMessageIDs.count) new message\(pendingMessageIDs.count == 1 ? "" : "s")", symbol: "tray.and.arrow.down"))
+            }
+            if let p = historyProgress, p.total > 0 {
+                items.append(.init(conversation: name, status: "Sorting older history — \(Int(Double(p.done) / Double(p.total) * 100))%", symbol: "clock.arrow.circlepath"))
+            }
+            if let err = historyError {
+                items.append(.init(conversation: name, status: "Older history stopped: \(err)", symbol: "exclamationmark.triangle"))
+            }
+        }
+        if let busy = background.working, let chat = chats.first(where: { $0.id == busy }) {
+            items.append(.init(conversation: ContactNames.shared.shortDisplay(chat.participants), status: "Filing new messages in the background", symbol: "tray.and.arrow.down"))
+        }
+        for id in settings.followedChats where id != settings.selectedChatRowID && settings.pausedChats.contains(id) {
+            if let chat = chats.first(where: { $0.id == id }) {
+                items.append(.init(conversation: ContactNames.shared.shortDisplay(chat.participants), status: "Sorting paused", symbol: "pause.circle"))
+            }
+        }
+        return items
+    }
+
     /// "Retry" after the follow-up check failed.
     func retryFollowUps() async {
         guard let myChat = settings.selectedChatRowID, !isAnalyzing, let client = settings.makeClient() else { return }
@@ -476,6 +564,42 @@ final class WeftViewModel {
         return min(filed, firstPending - 1)
     }
 
+    // MARK: - Editing topics by hand (with Undo)
+
+    /// Apply a hand correction, save it, and register Undo/Redo (Edit menu,
+    /// ⌘Z / ⇧⌘Z). Later sorting only adds new messages, so corrections
+    /// stick — until a full Re-sort Everything.
+    func editTopics(_ actionName: String, undoManager: UndoManager?, _ change: ([Topic]) -> [Topic]) {
+        guard let chat = settings.selectedChatRowID else { return }
+        let before = topics
+        let after = change(before)
+        guard after != before else { return }
+        applyEdit(after, chat: chat)
+        registerEditUndo(actionName, undoManager: undoManager, chat: chat, restore: before, redo: after)
+    }
+
+    private func applyEdit(_ newTopics: [Topic], chat: Int64) {
+        topics = newTopics
+        sortTopicsByActivity()
+        if case .topic(let id)? = sidebarSelection, !topics.contains(where: { $0.id == id }) {
+            sidebarSelection = .all
+        }
+        saveCache(chat: chat, filedThrough: Self.checkpoint(messages: messages, pending: pendingMessageIDs))
+    }
+
+    private func registerEditUndo(_ name: String, undoManager: UndoManager?, chat: Int64, restore: [Topic], redo: [Topic]) {
+        guard let undoManager else { return }
+        undoManager.registerUndo(withTarget: self) { vm in
+            MainActor.assumeIsolated {
+                // Only undo into the conversation the edit was made in.
+                guard vm.settings.selectedChatRowID == chat else { return }
+                vm.applyEdit(restore, chat: chat)
+                vm.registerEditUndo(name, undoManager: undoManager, chat: chat, restore: redo, redo: restore)
+            }
+        }
+        undoManager.setActionName(name)
+    }
+
     // MARK: - Older history
 
     /// Messages in the open conversation that no thread holds yet (and that
@@ -491,7 +615,8 @@ final class WeftViewModel {
     /// go first: this waits whenever something new is being filed.
     func startHistoryBackfill() {
         guard settings.sortOlderHistory, backfillTask == nil, !topics.isEmpty,
-              settings.selectedChatRowID != nil, historyError == nil else { return }
+              let chat = settings.selectedChatRowID, historyError == nil,
+              !settings.pausedChats.contains(chat), !settings.recentOnlyChats.contains(chat) else { return }
         let chatAtStart = settings.selectedChatRowID
         backfillTask = Task { [weak self] in
             await self?.runBackfill(chat: chatAtStart)
@@ -508,7 +633,8 @@ final class WeftViewModel {
             await checkHistoryLoops()
             return
         }
-        while !Task.isCancelled, mySession == session, settings.sortOlderHistory {
+        while !Task.isCancelled, mySession == session, settings.sortOlderHistory,
+              let c = chat, !settings.pausedChats.contains(c), !settings.recentOnlyChats.contains(c) {
             let remaining = unsortedHistory()
             if remaining.isEmpty {
                 await checkHistoryLoops()
@@ -689,12 +815,39 @@ final class WeftViewModel {
         updateBadge()
     }
 
-    /// A banner was clicked.
-    func openConversation(_ id: Int64) async {
-        if let chat = chats.first(where: { $0.id == id }) { await selectChat(chat) }
+    /// A banner or reminder was clicked.
+    func openConversation(_ id: Int64, loop: UUID? = nil) async {
+        if settings.selectedChatRowID != id, let chat = chats.first(where: { $0.id == id }) { await selectChat(chat) }
+        if let loop, loops.contains(where: { $0.id == loop }) { sidebarSelection = .loop(loop) }
     }
 
     // MARK: - Conversations
+
+    /// Attach photos and files to their messages.
+    static func withAttachments(_ messages: [ChatMessage], chat: Int64, after: Int64 = 0) async -> [ChatMessage] {
+        guard let byMessage = try? await ChatDBReader.shared.fetchAttachments(chatRowID: chat, after: after),
+              !byMessage.isEmpty else { return messages }
+        return messages.map { m in
+            var m = m
+            m.attachments = byMessage[m.id] ?? []
+            return m
+        }
+    }
+
+    /// Open this conversation in Messages. One-to-one conversations open to
+    /// that person; for group chats Messages itself opens (there's no
+    /// public way to open a specific group).
+    func openInMessages(_ chat: ChatInfo? = nil) {
+        guard let chat = chat ?? selectedChat else { return }
+        let handles = chat.participants.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        if handles.count == 1, let handle = handles.first,
+           let url = URL(string: (chat.service == "SMS" ? "sms:" : "imessage:") + handle) {
+            NSWorkspace.shared.open(url)
+        } else {
+            NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: "/System/Applications/Messages.app"),
+                                               configuration: NSWorkspace.OpenConfiguration())
+        }
+    }
 
     /// Contact name (or number) on each incoming message, for group chats
     /// and for the AI transcript.
@@ -819,6 +972,8 @@ final class WeftViewModel {
     }
 
     private func autoSort() async {
+        // Paused: new messages stay shown but nothing goes to the AI.
+        if let chat = settings.selectedChatRowID, settings.pausedChats.contains(chat) { return }
         guard !isAnalyzing else {
             scheduleAutoSort(after: 3)
             return
@@ -977,6 +1132,7 @@ final class WeftViewModel {
             ),
             chatId: chatId
         )
+        if chatId == settings.selectedChatRowID { syncReminders() }
     }
 
     /// Merge freshly detected loops with stored ones, preserving the user's
@@ -993,9 +1149,29 @@ final class WeftViewModel {
     }
 
     func setLoopStatus(_ loop: OpenLoop, _ status: LoopStatus) {
-        guard let index = loops.firstIndex(where: { $0.id == loop.id }) else { return }
-        loops[index].status = status
+        updateLoop(loop.id) { $0.status = status }
+    }
+
+    /// Change one follow-up (owner, due date, snooze…), save, and refresh
+    /// its reminder.
+    func updateLoop(_ id: UUID, _ change: (inout OpenLoop) -> Void) {
+        guard let index = loops.firstIndex(where: { $0.id == id }) else { return }
+        change(&loops[index])
         persistLoops()
+    }
+
+    /// Snooze presets: later today (+3h), tomorrow 9:00, next week 9:00.
+    func snooze(_ loop: OpenLoop, until date: Date) {
+        updateLoop(loop.id) { $0.snoozedUntil = date }
+        if sidebarSelection == .loop(loop.id) { sidebarSelection = .all }
+    }
+
+    /// Keep this conversation's reminder notifications in step with its
+    /// follow-ups (due dates and snoozes in the future, open ones only).
+    func syncReminders() {
+        guard let chat = settings.selectedChatRowID else { return }
+        let name = selectedChat.map { ContactNames.shared.shortDisplay($0.participants) } ?? "Weft"
+        Notifier.shared.syncReminders(loops: loops, chat: chat, conversationName: name, settings: settings)
     }
 
     private func persistLoops() {
@@ -1009,6 +1185,7 @@ final class WeftViewModel {
             loops: loops
         )
         try? SegmentationCache.save(analysis, chatId: chatId)
+        syncReminders()
     }
 
     // MARK: - Sending

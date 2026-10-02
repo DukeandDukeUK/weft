@@ -17,6 +17,8 @@ final class BackgroundSorter {
     var unread: Set<Int64> { Set(unreadCounts.filter { $0.value > 0 }.keys) }
     /// Called after each pass (to refresh the Dock badge).
     var onChange: (() -> Void)?
+    /// Conversation being filed right now (for the queue).
+    private(set) var working: Int64?
     /// Display names for banners.
     var conversationName: (Int64) -> String = { _ in "Messages" }
     private var running = false
@@ -53,7 +55,12 @@ final class BackgroundSorter {
                 Notifier.shared.announce(recent.map(WeftViewModel.labeled), chat: chat,
                                          conversationName: conversationName(chat), settings: settings)
             }
-            await fileNew(chat: chat, settings: settings, openChat: openChat)
+            // Paused conversations: still counted for the badge, never sent.
+            if !settings.pausedChats.contains(chat) {
+                working = chat
+                await fileNew(chat: chat, settings: settings, openChat: openChat)
+                working = nil
+            }
         }
         onChange?()
     }

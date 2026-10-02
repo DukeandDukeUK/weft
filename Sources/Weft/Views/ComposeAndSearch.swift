@@ -91,50 +91,105 @@ struct ComposeView: View {
 
 struct SearchResultsView: View {
     @Bindable var viewModel: WeftViewModel
+    @State private var everywhere: [(chat: Int64, message: ChatMessage)] = []
+    @State private var searching = false
 
     var body: some View {
+        VStack(spacing: 0) {
+            Picker("Search in", selection: $viewModel.searchAllConversations) {
+                Text("This Conversation").tag(false)
+                Text("All Conversations").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 360)
+            .padding(10)
+            Divider()
+            if viewModel.searchAllConversations {
+                allResults
+            } else {
+                thisResults
+            }
+        }
+        // Search every added conversation (debounced as you type).
+        .task(id: "\(viewModel.searchText)|\(viewModel.searchAllConversations)") {
+            guard viewModel.searchAllConversations else { return }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            searching = true
+            let found = (try? await ChatDBReader.shared.search(viewModel.searchText, inChats: viewModel.settings.followedChats)) ?? []
+            everywhere = found.map { (chat: $0.chat, message: WeftViewModel.labeled($0.message)) }
+            searching = false
+        }
+    }
+
+    @ViewBuilder
+    private var thisResults: some View {
         let results = viewModel.searchResults
         if results.isEmpty {
-            VStack {
-                Spacer()
-                Text("No matches for “\(viewModel.searchText)”")
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-            .frame(maxWidth: .infinity)
+            empty
         } else {
             List(results) { message in
-                Button {
-                    viewModel.jumpToMessage(message)
-                } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(message.speaker)
-                                .font(.caption)
-                                .bold()
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            if let topic = viewModel.topicTitle(for: message) {
-                                Text(topic)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                        }
-                        Text(message.text)
-                            .lineLimit(3)
-                        HStack(spacing: 4) {
-                            Text(message.date, style: .date)
-                            Text(message.date, style: .time)
-                        }
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 2)
+                Button { viewModel.jumpToMessage(message) } label: {
+                    row(message, conversation: nil, topic: viewModel.topicTitle(for: message))
                 }
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    @ViewBuilder
+    private var allResults: some View {
+        if everywhere.isEmpty {
+            if searching { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) } else { empty }
+        } else {
+            List {
+                ForEach(Array(everywhere.enumerated()), id: \.offset) { _, hit in
+                    Button {
+                        Task { await viewModel.jumpToMessage(hit.message, inChat: hit.chat) }
+                    } label: {
+                        row(hit.message, conversation: name(hit.chat), topic: nil)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var empty: some View {
+        VStack {
+            Spacer()
+            Text("No matches for “\(viewModel.searchText)”").foregroundStyle(.secondary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func name(_ chat: Int64) -> String {
+        viewModel.chats.first { $0.id == chat }.map { ContactNames.shared.shortDisplay($0.participants) } ?? "Conversation"
+    }
+
+    private func row(_ message: ChatMessage, conversation: String?, topic: String?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                if let conversation {
+                    Text(conversation).font(.caption).bold().foregroundStyle(WeftStyle.accent)
+                }
+                Text(message.speaker).font(.caption).bold().foregroundStyle(.secondary)
+                Spacer()
+                if let topic {
+                    Text(topic).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Text(message.text).lineLimit(3)
+            HStack(spacing: 4) {
+                Text(message.date, style: .date)
+                Text(message.date, style: .time)
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
     }
 }
 
@@ -182,6 +237,60 @@ struct LoopDetailView: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 340)
+
+                Divider().padding(.vertical, 4)
+
+                Picker("Who", selection: Binding(
+                    get: { loop.owner ?? .them },
+                    set: { new in viewModel.updateLoop(loop.id) { $0.owner = new } }
+                )) {
+                    ForEach(LoopOwner.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 340)
+
+                HStack {
+                    Toggle("Due date", isOn: Binding(
+                        get: { loop.dueDate != nil },
+                        set: { on in
+                            let tomorrow9 = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0,
+                                of: Calendar.current.date(byAdding: .day, value: 1, to: Date())!)
+                            viewModel.updateLoop(loop.id) { $0.dueDate = on ? tomorrow9 : nil }
+                        }
+                    ))
+                    if let due = loop.dueDate {
+                        DatePicker("", selection: Binding(
+                            get: { due },
+                            set: { new in viewModel.updateLoop(loop.id) { $0.dueDate = new } }
+                        ))
+                        .labelsHidden()
+                    }
+                }
+                if loop.dueDate != nil || loop.snoozedUntil != nil {
+                    Text("Weft reminds you with a notification at that time.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if loop.status == .open {
+                    Menu {
+                        let cal = Calendar.current
+                        Button("Later Today (3 hours)") { viewModel.snooze(loop, until: Date().addingTimeInterval(3 * 3600)) }
+                        Button("Tomorrow Morning") {
+                            viewModel.snooze(loop, until: cal.date(bySettingHour: 9, minute: 0, second: 0, of: cal.date(byAdding: .day, value: 1, to: Date())!)!)
+                        }
+                        Button("Next Week") {
+                            viewModel.snooze(loop, until: cal.date(bySettingHour: 9, minute: 0, second: 0, of: cal.date(byAdding: .day, value: 7, to: Date())!)!)
+                        }
+                        if loop.isSnoozed() {
+                            Divider()
+                            Button("Unsnooze") { viewModel.updateLoop(loop.id) { $0.snoozedUntil = nil } }
+                        }
+                    } label: {
+                        Label(loop.isSnoozed() ? "Snoozed until \(loop.snoozedUntil!.formatted(date: .abbreviated, time: .shortened))" : "Snooze", systemImage: "moon.zzz")
+                    }
+                    .fixedSize()
+                }
             }
             .padding(24)
             .frame(maxWidth: 600, alignment: .leading)

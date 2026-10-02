@@ -17,6 +17,8 @@ struct ChatMessage: Identifiable, Sendable, Hashable {
     var reactions: [Reaction] = []
     /// Contact name (or number) of whoever sent it; empty for your own.
     var senderName: String = ""
+    /// Photos, videos and files sent with it.
+    var attachments: [Attachment] = []
 
     /// Label used in transcripts sent to the AI: "You", the sender's name
     /// (group chats, known contacts), or "Them".
@@ -31,6 +33,24 @@ struct ChatMessage: Identifiable, Sendable, Hashable {
     static func dateFromAppleTimestamp(_ nanos: Int64) -> Date {
         Date(timeIntervalSince1970: Double(nanos) / 1_000_000_000 + 978307200)
     }
+}
+
+// MARK: - Attachment
+
+/// A file sent with a message (from Messages' attachment table).
+struct Attachment: Sendable, Hashable, Identifiable {
+    let id: Int64
+    /// Full path on this Mac (Messages stores "~/Library/Messages/Attachments/…").
+    let path: String
+    let mime: String
+    let name: String
+    let bytes: Int64
+
+    var url: URL { URL(fileURLWithPath: path) }
+    var isImage: Bool { mime.hasPrefix("image/") }
+    var isVideo: Bool { mime.hasPrefix("video/") }
+    /// Not on this Mac yet (still in iCloud).
+    var isMissing: Bool { !FileManager.default.fileExists(atPath: path) }
 }
 
 // MARK: - Reaction
@@ -132,6 +152,43 @@ struct OpenLoop: Identifiable, Sendable, Hashable, Codable {
     /// Raised while sorting old history: still needs checking against the
     /// later conversation, which may have resolved it.
     var needsLaterCheck: Bool? = nil
+    /// Who it's waiting on.
+    var owner: LoopOwner? = nil
+    /// When it's due (a reminder fires then).
+    var dueDate: Date? = nil
+    /// Hidden from the active list until then (a reminder fires then).
+    var snoozedUntil: Date? = nil
+
+    func isSnoozed(at now: Date = Date()) -> Bool { (snoozedUntil ?? .distantPast) > now }
+    func isOverdue(at now: Date = Date()) -> Bool {
+        guard status == .open, let dueDate else { return false }
+        return dueDate < Calendar.current.startOfDay(for: now)
+    }
+}
+
+/// Who a follow-up is waiting on.
+enum LoopOwner: String, Codable, Sendable, CaseIterable {
+    /// You asked, or someone promised you something.
+    case them
+    /// Someone asked you, or you promised something.
+    case me
+
+    var label: String { self == .them ? "Waiting on them" : "Owed by me" }
+
+    /// AI replies: "me" / "them" (anything else → nil).
+    static func parse(_ s: String?) -> LoopOwner? { s.flatMap { LoopOwner(rawValue: $0.lowercased()) } }
+}
+
+enum DueDateParser {
+    /// "YYYY-MM-DD" from the AI → that day at 9:00 local time.
+    static func parse(_ s: String?) -> Date? {
+        guard let s, s.count >= 10 else { return nil }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        guard let day = f.date(from: String(s.prefix(10))) else { return nil }
+        return Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: day)
+    }
 }
 
 // MARK: - Sidebar selection

@@ -51,6 +51,14 @@ final class AppSettings {
     var sortOlderHistory: Bool { didSet { defaults.set(sortOlderHistory, forKey: Keys.sortOlderHistory) } }
     /// ChatGPT (Codex) Fast mode.
     var codexFast: Bool { didSet { defaults.set(codexFast, forKey: Keys.codexFast) } }
+    /// Conversations whose sorting is paused (nothing sent to the AI).
+    var pausedChats: Set<Int64> {
+        didSet { defaults.set(pausedChats.map(String.init), forKey: Keys.paused) }
+    }
+    /// Conversations that skip older-history sorting.
+    var recentOnlyChats: Set<Int64> {
+        didSet { defaults.set(recentOnlyChats.map(String.init), forKey: Keys.recentOnly) }
+    }
     /// Conversations you've OK'd sending to the AI (first-sort question).
     var consentedChats: Set<Int64> {
         didSet { defaults.set(consentedChats.map(String.init), forKey: Keys.consented) }
@@ -85,6 +93,8 @@ final class AppSettings {
         static let dockBadge = "weft.dockBadge"
         static let codexFast = "weft.codexFast"
         static let consented = "weft.consentedChats"
+        static let paused = "weft.pausedChats"
+        static let recentOnly = "weft.recentOnlyChats"
         static let sortOlderHistory = "weft.sortOlderHistory"
         static let notifOnboarded = "weft.notificationsOnboarded"
         static let lastViewed = "weft.lastViewed"
@@ -112,6 +122,8 @@ final class AppSettings {
         self.dockBadge = d.object(forKey: Keys.dockBadge) as? Bool ?? true
         self.codexFast = d.bool(forKey: Keys.codexFast)
         self.consentedChats = Set((d.stringArray(forKey: Keys.consented) ?? []).compactMap(Int64.init))
+        self.pausedChats = Set((d.stringArray(forKey: Keys.paused) ?? []).compactMap(Int64.init))
+        self.recentOnlyChats = Set((d.stringArray(forKey: Keys.recentOnly) ?? []).compactMap(Int64.init))
         self.sortOlderHistory = d.object(forKey: Keys.sortOlderHistory) as? Bool ?? true
         self.notificationsOnboarded = d.bool(forKey: Keys.notifOnboarded)
         Self.apply(appearance: appearance)

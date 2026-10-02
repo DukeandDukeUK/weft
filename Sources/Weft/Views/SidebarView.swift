@@ -4,6 +4,9 @@ import SwiftUI
 /// rather than relying on List's own selection handling.
 struct SidebarView: View {
     @Bindable var viewModel: WeftViewModel
+    @Environment(\.undoManager) private var undoManager
+    @State private var renaming: Topic?
+    @State private var renameText = ""
 
     var body: some View {
         List {
@@ -40,6 +43,15 @@ struct SidebarView: View {
                     }
                     .contextMenu {
                         Button("Open") { Task { await viewModel.selectChat(chat) } }
+                        Button("Open in Messages") { viewModel.openInMessages(chat) }
+                        Divider()
+                        Button(viewModel.isPaused(chat.id) ? "Resume Sorting" : "Pause Sorting") {
+                            viewModel.setPaused(chat.id, !viewModel.isPaused(chat.id))
+                        }
+                        Toggle("Recent Messages Only", isOn: Binding(
+                            get: { viewModel.settings.recentOnlyChats.contains(chat.id) },
+                            set: { viewModel.setRecentOnly(chat.id, $0) }
+                        ))
                         Divider()
                         Button("Remove from Weft", role: .destructive) {
                             Task { await viewModel.removeConversation(chat.id) }
@@ -105,6 +117,22 @@ struct SidebarView: View {
                             CountText(count: topic.messageIds.count)
                         }
                     }
+                    .contextMenu {
+                        Button("Rename…") {
+                            renameText = topic.title
+                            renaming = topic
+                        }
+                        Menu("Merge Into") {
+                            ForEach(viewModel.topics.filter { $0.id != topic.id }) { other in
+                                Button(other.title) {
+                                    viewModel.editTopics("Merge Topics", undoManager: undoManager) {
+                                        TopicEditor.merge($0, topic.id, into: other.id)
+                                    }
+                                }
+                            }
+                        }
+                        .disabled(viewModel.topics.count < 2)
+                    }
                 }
             } header: {
                 HStack(spacing: 6) {
@@ -126,38 +154,92 @@ struct SidebarView: View {
             }
 
             Section("Follow-ups (\(viewModel.openLoopCount))") {
-                let active = viewModel.loops.filter { $0.status == .open }
-                let done = viewModel.loops.filter { $0.status != .open }
-                if active.isEmpty {
-                    Text(viewModel.loops.isEmpty ? "None found yet." : "Nothing outstanding.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                ForEach(active) { loop in loopRow(loop) }
-                if !done.isEmpty {
-                    DisclosureGroup("Done (\(done.count))") {
-                        ForEach(done) { loop in loopRow(loop) }
+                // Re-checks once a minute so snoozes end and due dates turn
+                // overdue on time.
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    let now = context.date
+                    let open = viewModel.loops.filter { $0.status == .open }
+                    let active = open.filter { !$0.isSnoozed(at: now) }
+                    let snoozed = open.filter { $0.isSnoozed(at: now) }
+                    let done = viewModel.loops.filter { $0.status != .open }
+                    let waiting = active.filter { $0.owner != .me }
+                    let owed = active.filter { $0.owner == .me }
+                    VStack(alignment: .leading, spacing: 2) {
+                        if active.isEmpty {
+                            Text(viewModel.loops.isEmpty ? "None found yet." : "Nothing outstanding.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .padding(.leading, 6)
+                        }
+                        if !owed.isEmpty {
+                            groupLabel("Owed by me")
+                            ForEach(owed) { loop in loopRow(loop, now: now) }
+                        }
+                        if !waiting.isEmpty {
+                            groupLabel("Waiting on them")
+                            ForEach(waiting) { loop in loopRow(loop, now: now) }
+                        }
+                        if !snoozed.isEmpty {
+                            DisclosureGroup("Snoozed (\(snoozed.count))") {
+                                ForEach(snoozed) { loop in loopRow(loop, now: now) }
+                            }
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        }
+                        if !done.isEmpty {
+                            DisclosureGroup("Done (\(done.count))") {
+                                ForEach(done) { loop in loopRow(loop, now: now) }
+                            }
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        }
                     }
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
                 }
             }
         }
         .listStyle(.sidebar)
+        .alert("Rename Topic", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+            TextField("Topic name", text: $renameText)
+            Button("Rename") {
+                if let topic = renaming {
+                    viewModel.editTopics("Rename Topic", undoManager: undoManager) {
+                        TopicEditor.rename($0, topic.id, to: renameText)
+                    }
+                }
+                renaming = nil
+            }
+            Button("Cancel", role: .cancel) { renaming = nil }
+        }
         // Wide enough that conversation names and thread titles fit.
         .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 420)
         .navigationTitle(viewModel.selectedChat.map { chatTitle($0) } ?? "Weft")
     }
 
-    private func loopRow(_ loop: OpenLoop) -> some View {
+    private func groupLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.leading, 6)
+            .padding(.top, 4)
+    }
+
+    private func loopRow(_ loop: OpenLoop, now: Date = Date()) -> some View {
         SidebarRow(
             isSelected: viewModel.sidebarSelection == .loop(loop.id),
             action: { viewModel.sidebarSelection = .loop(loop.id) }
         ) {
             Label {
-                Text(loop.title).lineLimit(2)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(loop.title).lineLimit(2)
+                    if loop.status == .open, let due = loop.dueDate {
+                        Text(loop.isOverdue(at: now) ? "Overdue · \(due.formatted(.dateTime.month(.abbreviated).day()))" : "Due \(due.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))")
+                            .font(.caption2)
+                            .foregroundStyle(loop.isOverdue(at: now) ? Color.red : Color.secondary)
+                    }
+                }
             } icon: {
                 Image(systemName: loop.status == .open ? "circle" : (loop.status == .resolved ? "checkmark.circle" : "xmark.circle"))
+                    .foregroundStyle(loop.isOverdue(at: now) ? Color.red : Color.primary)
             }
             .foregroundStyle(loop.status == .open ? .primary : .secondary)
             .accessibilityLabel("\(loop.title), \(loop.status == .open ? "open" : (loop.status == .resolved ? "done" : "dismissed"))")

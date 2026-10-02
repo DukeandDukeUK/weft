@@ -1,0 +1,68 @@
+import Foundation
+
+// MARK: - TopicEditor
+
+/// Hand corrections to topics. Pure functions over the topic list, so the
+/// view model can apply them with Undo and tests can check them directly.
+/// Topics left with no messages are removed.
+enum TopicEditor {
+    static func rename(_ topics: [Topic], _ id: UUID, to title: String) -> [Topic] {
+        let clean = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return topics }
+        return topics.map { t in
+            var t = t
+            if t.id == id { t.title = clean }
+            return t
+        }
+    }
+
+    /// Everything in `source` joins `target`; `source` disappears.
+    static func merge(_ topics: [Topic], _ source: UUID, into target: UUID) -> [Topic] {
+        guard source != target,
+              let from = topics.first(where: { $0.id == source }),
+              topics.contains(where: { $0.id == target }) else { return topics }
+        return topics.compactMap { t in
+            if t.id == source { return nil }
+            var t = t
+            if t.id == target { t.messageIds = Array(Set(t.messageIds + from.messageIds)).sorted() }
+            return t
+        }
+    }
+
+    /// Move messages into an existing topic (taking them out of any other).
+    static func move(_ topics: [Topic], messages ids: Set<Int64>, to target: UUID) -> [Topic] {
+        guard topics.contains(where: { $0.id == target }), !ids.isEmpty else { return topics }
+        return topics.compactMap { t in
+            var t = t
+            if t.id == target {
+                t.messageIds = Array(Set(t.messageIds).union(ids)).sorted()
+            } else {
+                t.messageIds.removeAll { ids.contains($0) }
+            }
+            return t.messageIds.isEmpty ? nil : t
+        }
+    }
+
+    /// Move messages into a brand-new topic.
+    static func moveToNew(_ topics: [Topic], messages ids: Set<Int64>, title: String) -> (topics: [Topic], newID: UUID?) {
+        let clean = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !ids.isEmpty, !clean.isEmpty else { return (topics, nil) }
+        let new = Topic(id: UUID(), title: clean, summary: "", messageIds: ids.sorted())
+        let rest: [Topic] = topics.compactMap { t in
+            var t = t
+            t.messageIds.removeAll { ids.contains($0) }
+            return t.messageIds.isEmpty ? nil : t
+        }
+        return (rest + [new], new.id)
+    }
+
+    /// Split a topic: this message and everything after it (in that topic)
+    /// become a new topic.
+    static func split(_ topics: [Topic], _ id: UUID, from messageId: Int64, newTitle: String) -> (topics: [Topic], newID: UUID?) {
+        guard let topic = topics.first(where: { $0.id == id }) else { return (topics, nil) }
+        let moving = Set(topic.messageIds.filter { $0 >= messageId })
+        // Splitting at the first message would just rename the topic.
+        guard !moving.isEmpty, moving.count < topic.messageIds.count else { return (topics, nil) }
+        return moveToNew(topics, messages: moving, title: newTitle)
+    }
+}
