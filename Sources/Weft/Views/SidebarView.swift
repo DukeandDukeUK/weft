@@ -24,9 +24,18 @@ struct SidebarView: View {
                                 .foregroundStyle(WeftStyle.accent)
                         }
                         Spacer(minLength: 4)
-                        if viewModel.background.unread.contains(chat.id) {
-                            Circle().fill(WeftStyle.accent).frame(width: 8, height: 8)
-                                .help("New messages")
+                        let count = viewModel.settings.selectedChatRowID == chat.id
+                            ? viewModel.openUnread
+                            : (viewModel.background.unreadCounts[chat.id] ?? 0)
+                        if count > 0 {
+                            Text("\(count)")
+                                .font(.caption2.weight(.bold))
+                                .monospacedDigit()
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(WeftStyle.accent, in: Capsule())
+                                .help("\(count) new message\(count == 1 ? "" : "s")")
                         }
                     }
                     .contextMenu {

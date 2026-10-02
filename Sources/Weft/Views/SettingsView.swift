@@ -33,6 +33,11 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Notifications") {
+                NotificationOptions(settings: viewModel.settings)
+            }
+            .onChange(of: viewModel.settings.dockBadge) { _, _ in viewModel.updateBadge() }
+
             Section("Appearance") {
                 Picker("Appearance", selection: Bindable(viewModel.settings).appearance) {
                     Text("Automatic").tag("system")

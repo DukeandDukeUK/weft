@@ -49,6 +49,14 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .weftOpenSettings)) { _ in
             viewModel.showSettings = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .weftOpenConversation)) { note in
+            if let id = note.userInfo?["chat"] as? Int64 {
+                Task { await viewModel.openConversation(id) }
+            }
+        }
+        .sheet(isPresented: $viewModel.showNotificationSetup) {
+            NotificationSetupView(settings: viewModel.settings) { viewModel.updateBadge() }
+        }
     }
 }
 

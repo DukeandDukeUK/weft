@@ -16,7 +16,12 @@ final class WeftViewModel {
         settings.followedChats.compactMap { id in chats.first { $0.id == id } }
     }
 
-    /// Group chats show who said what; replying isn't supported for them yet.
+    /// New incoming messages in the open conversation while Weft wasn't in front.
+    var openUnread = 0
+    /// First-time setup: the notifications step.
+    var showNotificationSetup = false
+
+    /// Group chats show who said what.
     var isGroupChat: Bool { settings.selectedHandleId.contains(",") }
 
     // Data
@@ -121,6 +126,14 @@ final class WeftViewModel {
     static let noAIMessage = "No AI is set up to sort messages yet. Open Settings (gear icon) and pick one."
 
     func startup() async {
+        background.onChange = { [weak self] in self?.updateBadge() }
+        background.conversationName = { [weak self] id in
+            self?.chats.first { $0.id == id }.map { ContactNames.shared.shortDisplay($0.participants) } ?? "Messages"
+        }
+        // Coming back to Weft = you've now seen the open conversation.
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.didBecomeActive() }
+        }
         await RecommendationStore.shared.refresh()
         await settings.autoPickProviderIfNeeded()
         await checkForBetterLocalModel()
@@ -145,6 +158,12 @@ final class WeftViewModel {
         }
         do {
             chats = try await reader.listChats()
+            // Don't announce messages that were already there at launch.
+            for id in settings.followedChats {
+                if let latest = try? await reader.latestMessageRowID(chatRowID: id) {
+                    Notifier.shared.seed(chat: id, through: latest)
+                }
+            }
         } catch {
             notice = error.localizedDescription
             return
@@ -172,6 +191,9 @@ final class WeftViewModel {
         settings.selectedChatRowID = chat.id
         if !settings.followedChats.contains(chat.id) { settings.followedChats.append(chat.id) }
         background.markRead(chat.id)
+        openUnread = 0
+        // First-time setup: ask about notifications after the first pick.
+        if !settings.notificationsOnboarded { showNotificationSetup = true }
         // For 1:1 chats the single participant is who we send to.
         settings.selectedHandleId = chat.participants
         sidebarSelection = .all
@@ -249,7 +271,16 @@ final class WeftViewModel {
             if !fresh.isEmpty {
                 messages.append(contentsOf: fresh)
                 lastSeenRowID = max(lastSeenRowID, fresh.map(\.id).max() ?? 0)
-                settings.markViewed(chat: chatId, through: lastSeenRowID)
+                if NSApp.isActive {
+                    settings.markViewed(chat: chatId, through: lastSeenRowID)
+                } else {
+                    // Not in front: count it and announce it.
+                    openUnread += fresh.filter { !$0.isFromMe }.count
+                    Notifier.shared.announce(fresh, chat: chatId,
+                                             conversationName: selectedChat.map { ContactNames.shared.shortDisplay($0.participants) } ?? "Messages",
+                                             settings: settings)
+                    updateBadge()
+                }
             }
             // Reactions can arrive on their own, after the message they're on.
             await applyNewReactions(chatRowID: chatId)
@@ -331,6 +362,25 @@ final class WeftViewModel {
             settings.setModel(tier.model, for: .ollama)
             betterLocalModel = nil
         }
+    }
+
+    // MARK: - Notifications
+
+    func updateBadge() {
+        let total = background.unreadCounts.values.reduce(0, +) + openUnread
+        Notifier.shared.setBadge(total, enabled: settings.dockBadge)
+    }
+
+    private func didBecomeActive() {
+        guard let chat = settings.selectedChatRowID else { return }
+        settings.markViewed(chat: chat, through: lastSeenRowID)
+        openUnread = 0
+        updateBadge()
+    }
+
+    /// A banner was clicked.
+    func openConversation(_ id: Int64) async {
+        if let chat = chats.first(where: { $0.id == id }) { await selectChat(chat) }
     }
 
     // MARK: - Conversations

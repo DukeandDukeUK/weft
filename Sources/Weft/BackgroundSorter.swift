@@ -11,8 +11,14 @@ import Foundation
 /// touches the others, through their saved analysis files.
 @MainActor @Observable
 final class BackgroundSorter {
-    /// Conversations with messages newer than the last time you opened them.
-    private(set) var unread: Set<Int64> = []
+    /// New incoming messages per conversation since you last looked.
+    private(set) var unreadCounts: [Int64: Int] = [:]
+    /// Conversations with new messages (for the sidebar).
+    var unread: Set<Int64> { Set(unreadCounts.filter { $0.value > 0 }.keys) }
+    /// Called after each pass (to refresh the Dock badge).
+    var onChange: (() -> Void)?
+    /// Display names for banners.
+    var conversationName: (Int64) -> String = { _ in "Messages" }
     private var running = false
     private var pending: Task<Void, Never>?
 
@@ -28,7 +34,10 @@ final class BackgroundSorter {
         }
     }
 
-    func markRead(_ chat: Int64) { unread.remove(chat) }
+    func markRead(_ chat: Int64) {
+        unreadCounts[chat] = 0
+        onChange?()
+    }
 
     private func run(settings: AppSettings, openChat: @MainActor () -> Int64?) async {
         guard !running else { return }
@@ -36,12 +45,17 @@ final class BackgroundSorter {
         defer { running = false }
         let reader = ChatDBReader.shared
         for chat in settings.followedChats where chat != openChat() {
-            // Unread dot.
-            if let latest = try? await reader.latestMessageRowID(chatRowID: chat) {
-                if latest > settings.lastViewedRowID(chat: chat) { unread.insert(chat) } else { unread.remove(chat) }
+            // New-message count, and a banner for anything not yet announced.
+            let viewed = settings.lastViewedRowID(chat: chat)
+            unreadCounts[chat] = (try? await reader.countIncoming(chatRowID: chat, after: viewed)) ?? 0
+            if (unreadCounts[chat] ?? 0) > 0,
+               let recent = try? await reader.fetchMessages(chatRowID: chat, after: viewed, newest: 20) {
+                Notifier.shared.announce(recent.map(WeftViewModel.labeled), chat: chat,
+                                         conversationName: conversationName(chat), settings: settings)
             }
             await fileNew(chat: chat, settings: settings, openChat: openChat)
         }
+        onChange?()
     }
 
     private func fileNew(chat: Int64, settings: AppSettings, openChat: @MainActor () -> Int64?) async {

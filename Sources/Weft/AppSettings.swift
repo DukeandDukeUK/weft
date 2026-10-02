@@ -43,6 +43,15 @@ final class AppSettings {
 
     func lastViewedRowID(chat: Int64) -> Int64 { lastViewed[String(chat)] ?? 0 }
 
+    /// Banner + sound when a new message arrives.
+    var notifyBanners: Bool { didSet { defaults.set(notifyBanners, forKey: Keys.notifyBanners) } }
+    /// "default", "none", or a Mac alert sound name (e.g. "Glass").
+    var notifySound: String { didSet { defaults.set(notifySound, forKey: Keys.notifySound) } }
+    /// Red count on Weft's Dock icon.
+    var dockBadge: Bool { didSet { defaults.set(dockBadge, forKey: Keys.dockBadge) } }
+    /// The notifications step of first-time setup has been shown.
+    var notificationsOnboarded: Bool { didSet { defaults.set(notificationsOnboarded, forKey: Keys.notifOnboarded) } }
+
     /// "system" (follow macOS), "light" or "dark".
     var appearance: String {
         didSet {
@@ -63,6 +72,10 @@ final class AppSettings {
         static let prefix = "weft.prefixThreadReplies"
         static let appearance = "weft.appearance"
         static let followed = "weft.followedChats"
+        static let notifyBanners = "weft.notifyBanners"
+        static let notifySound = "weft.notifySound"
+        static let dockBadge = "weft.dockBadge"
+        static let notifOnboarded = "weft.notificationsOnboarded"
         static let lastViewed = "weft.lastViewed"
     }
 
@@ -83,6 +96,10 @@ final class AppSettings {
         if followed.isEmpty, let only = d.string(forKey: Keys.chatRowID).flatMap(Int64.init) { followed = [only] }
         self.followedChats = followed
         self.lastViewed = (d.dictionary(forKey: Keys.lastViewed) as? [String: Int64]) ?? [:]
+        self.notifyBanners = d.object(forKey: Keys.notifyBanners) as? Bool ?? true
+        self.notifySound = d.string(forKey: Keys.notifySound) ?? "default"
+        self.dockBadge = d.object(forKey: Keys.dockBadge) as? Bool ?? true
+        self.notificationsOnboarded = d.bool(forKey: Keys.notifOnboarded)
         Self.apply(appearance: appearance)
     }
 

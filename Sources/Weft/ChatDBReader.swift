@@ -237,6 +237,22 @@ actor ChatDBReader {
         return try query(sql, bind: { sqlite3_bind_int64($0, 1, chatRowID) }) { columnInt64($0, 0) }.first ?? 0
     }
 
+    /// Incoming messages (not yours, not reactions) newer than `after` — the
+    /// count shown on a conversation and the Dock badge.
+    func countIncoming(chatRowID: Int64, after: Int64) throws -> Int {
+        let sql = """
+            SELECT COUNT(*)
+              FROM message m
+              JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+             WHERE cmj.chat_id = ? AND m.ROWID > ?
+               AND m.is_from_me = 0 AND m.associated_message_guid IS NULL
+            """
+        return try query(sql, bind: { stmt in
+            sqlite3_bind_int64(stmt, 1, chatRowID)
+            sqlite3_bind_int64(stmt, 2, after)
+        }) { Int(columnInt64($0, 0)) }.first ?? 0
+    }
+
     /// The last `limit` messages up to and including `upTo`, oldest first —
     /// context for filing new messages in the background.
     func fetchContext(chatRowID: Int64, upTo: Int64, limit: Int) throws -> [ChatMessage] {
