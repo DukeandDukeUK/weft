@@ -22,16 +22,7 @@ enum SegmentationCache {
             create: true
         )
         let dir = base.appending(path: "Weft", directoryHint: .isDirectory)
-        let fm = FileManager.default
-        if !fm.fileExists(atPath: dir.path) {
-            // Weft started life as "Instinct Threader": bring its saved topics
-            // and loops along on first launch (copy, so the old app still works).
-            let legacy = base.appending(path: "InstinctThreader", directoryHint: .isDirectory)
-            if fm.fileExists(atPath: legacy.path) {
-                try? fm.copyItem(at: legacy, to: dir)
-            }
-        }
-        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
 
