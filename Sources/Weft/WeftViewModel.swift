@@ -8,6 +8,11 @@ import AppKit
 @MainActor @Observable
 final class WeftViewModel {
     let settings = AppSettings.shared
+    /// Which Messages database to read (tests use a fixture).
+    var reader: ChatDBReader = .shared
+    /// Your own replies sent inside a topic: filed straight into it, but
+    /// still checked for follow-ups ("I'll send it tomorrow", "Done!").
+    var followUpQueue: Set<Int64> = []
     /// Sorts the conversations you aren't looking at.
     let background = BackgroundSorter()
 
@@ -105,7 +110,7 @@ final class WeftViewModel {
     private var watcher: ChatDBWatcher?
     private var isPolling = false
     private var autoSortTask: Task<Void, Never>?
-    private var lastSeenRowID: Int64 = 0
+    private(set) var lastSeenRowID: Int64 = 0
     /// Newest reaction row applied (reactions are separate rows in chat.db).
     private var lastReactionRowID: Int64 = 0
     /// Where each pending message is shown until Claude files it.
@@ -194,7 +199,6 @@ final class WeftViewModel {
         defer { isLoading = false }
         notice = nil
         dbMissing = false
-        let reader = ChatDBReader.shared
         switch await reader.checkAccess() {
         case .ok:
             needsFullDiskAccess = false
@@ -243,6 +247,7 @@ final class WeftViewModel {
         stopPolling()
         startNewSession()
         firstSortRequest = nil
+        followUpQueue = []
         settings.selectedChatRowID = chat.id
         if !settings.followedChats.contains(chat.id) { settings.followedChats.append(chat.id) }
         background.markRead(chat.id)
@@ -259,7 +264,7 @@ final class WeftViewModel {
         isLoading = true
         defer { isLoading = false }
         do {
-            messages = try await Self.withAttachments(ChatDBReader.shared.fetchMessages(chatRowID: chat.id).map(Self.labeled), chat: chat.id)
+            messages = try await Self.withAttachments(reader.fetchMessages(chatRowID: chat.id).map(Self.labeled), chat: chat.id, reader: reader)
             lastSeenRowID = messages.last?.id ?? 0
             settings.markViewed(chat: chat.id, through: messages.map(\.id).max() ?? 0)
             lastReactionRowID = 0
@@ -291,7 +296,12 @@ final class WeftViewModel {
     /// New messages are picked up the moment Messages writes them (file
     /// watch on its database), with a slow poll as a safety net.
     private func startPolling() {
-        stopPolling()
+        // Only reset the watching — never the sorting just scheduled for
+        // this conversation (that's what used to stop first sorts).
+        pollTask?.cancel()
+        pollTask = nil
+        watcher?.stop()
+        watcher = nil
         guard settings.selectedChatRowID != nil else { return }
         watcher = ChatDBWatcher { [weak self] in
             Task { @MainActor in await self?.pollOnce() }
@@ -326,10 +336,10 @@ final class WeftViewModel {
             let known = Set(messages.map(\.id))
             // Other added conversations get checked too (debounced).
             background.schedule(settings: settings) { [weak self] in self?.settings.selectedChatRowID }
-            let fresh = try await Self.withAttachments(ChatDBReader.shared
+            let fresh = try await Self.withAttachments(reader
                 .fetchMessages(chatRowID: chatId, after: lastSeenRowID)
                 .filter { !known.contains($0.id) }
-                .map(Self.labeled), chat: chatId, after: lastSeenRowID)
+                .map(Self.labeled), chat: chatId, after: lastSeenRowID, reader: reader)
             if !fresh.isEmpty {
                 messages.append(contentsOf: fresh)
                 lastSeenRowID = max(lastSeenRowID, fresh.map(\.id).max() ?? 0)
@@ -354,6 +364,10 @@ final class WeftViewModel {
                 // messages: short pause so a burst of replies is filed in
                 // one call. (A reply that lands mid-filing waits its turn.)
                 scheduleAutoSort(after: unfiled.allSatisfy(\.isFromMe) ? 0 : 3)
+            } else if !followUpQueue.isEmpty {
+                // Only a topic reply of yours: check it for follow-ups,
+                // shortly, so the answer it gets can share the same call.
+                scheduleAutoSort(after: 3)
             }
         } catch {
             // Polling failures are transient (e.g. DB briefly locked); don't
@@ -865,8 +879,8 @@ final class WeftViewModel {
     // MARK: - Conversations
 
     /// Attach photos and files to their messages.
-    static func withAttachments(_ messages: [ChatMessage], chat: Int64, after: Int64 = 0) async -> [ChatMessage] {
-        guard let byMessage = try? await ChatDBReader.shared.fetchAttachments(chatRowID: chat, after: after),
+    static func withAttachments(_ messages: [ChatMessage], chat: Int64, after: Int64 = 0, reader: ChatDBReader = .shared) async -> [ChatMessage] {
+        guard let byMessage = try? await reader.fetchAttachments(chatRowID: chat, after: after),
               !byMessage.isEmpty else { return messages }
         return messages.map { m in
             var m = m
@@ -900,7 +914,7 @@ final class WeftViewModel {
 
     /// Refresh the list of all conversations (for the picker).
     func reloadChats() async {
-        if let fresh = try? await ChatDBReader.shared.listChats() { chats = fresh }
+        if let fresh = try? await reader.listChats() { chats = fresh }
     }
 
     /// Stop following a conversation. Its saved threads are kept, so adding
@@ -927,7 +941,7 @@ final class WeftViewModel {
     /// Apply reaction rows newer than the last one seen: each person has at
     /// most one reaction of a kind per message; a removal row takes it back.
     private func applyNewReactions(chatRowID: Int64) async {
-        guard let events = try? await ChatDBReader.shared.fetchReactions(chatRowID: chatRowID, after: lastReactionRowID),
+        guard let events = try? await reader.fetchReactions(chatRowID: chatRowID, after: lastReactionRowID),
               !events.isEmpty else { return }
         lastReactionRowID = events.map(\.rowID).max() ?? lastReactionRowID
         var indexByGuid: [String: Int] = [:]
@@ -970,11 +984,13 @@ final class WeftViewModel {
                 unfiled.append(contentsOf: fresh[offset...])
                 break
             }
-            // Your own reply from this thread: certain, no call needed.
+            // Your own reply from this thread: its topic is certain, but it
+            // still gets a follow-up check.
             if message.isFromMe {
                 if !topics[index].messageIds.contains(message.id) {
                     topics[index].messageIds.append(message.id)
                 }
+                followUpQueue.insert(message.id)
             } else {
                 unfiled.append(message)
             }
@@ -1030,7 +1046,9 @@ final class WeftViewModel {
 
     /// Ask Claude where the pending messages belong, given the existing topics.
     private func fileNewMessages() async {
-        let allPending = messages.filter { pendingMessageIDs.contains($0.id) }
+        // Waiting to be filed, plus topic replies of yours waiting for a
+        // follow-up check (their placement is already done and is ignored).
+        let allPending = messages.filter { pendingMessageIDs.contains($0.id) || followUpQueue.contains($0.id) }
         guard !allPending.isEmpty, let myChat = settings.selectedChatRowID, uploadAllowed() else { return }
         // Oldest first, and no more than this AI can take in one call —
         // the rest wait for the next pass.
@@ -1105,6 +1123,7 @@ final class WeftViewModel {
                 filed.formUnion(stillWaiting)
             }
             for i in base.indices { base[i].messageIds.sort() }
+            followUpQueue.subtract(batchIDs)
 
             // Loops: add new ones, close the ones these messages resolved.
             loops = mergeLoops(result.newLoops)
@@ -1265,7 +1284,7 @@ final class WeftViewModel {
             if settings.prefixThreadReplies {
                 trimmed = "Re: \(topic.title) — \(trimmed)"
             }
-            activeThread = (topic.id, trimmed, Date())
+            noteReplySent(inTopic: topic.id, text: trimmed)
         } else {
             activeThread = nil
         }
@@ -1287,6 +1306,12 @@ final class WeftViewModel {
             notice = error.localizedDescription
             return false
         }
+    }
+
+    /// You replied inside a topic: that reply and the answers to it go
+    /// straight into the topic for a while.
+    func noteReplySent(inTopic topic: UUID, text: String) {
+        activeThread = (topic, text, Date())
     }
 
     // MARK: - Search / navigation helpers

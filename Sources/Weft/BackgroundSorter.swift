@@ -29,14 +29,41 @@ final class BackgroundSorter {
     private var pending: Task<Void, Never>?
 
     /// Debounced: a burst of writes to Messages becomes one pass.
+    private var debounceTask: Task<Void, Never>?
+    private var worker: Task<Void, Never>?
+    private var rerunRequested = false
+    /// Pause after Messages writes before a pass (tests shorten it).
+    var debounce: Double = 3
+
+    /// Debounced: a burst of writes to Messages becomes one pass. A pass
+    /// that's already running is never cancelled (a slow local model would
+    /// otherwise be interrupted every poll) — another pass is queued after it.
     /// - Parameter openChat: which conversation is open right now (checked
     ///   again before saving, in case you switch while it's working).
     func schedule(settings: AppSettings, openChat: @escaping @MainActor () -> Int64?) {
-        pending?.cancel()
-        pending = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
+        if worker != nil {
+            rerunRequested = true
+            return
+        }
+        debounceTask?.cancel()
+        debounceTask = Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: UInt64(self.debounce * 1_000_000_000))
             guard !Task.isCancelled else { return }
+            self.startWorker(settings: settings, openChat: openChat)
+        }
+    }
+
+    private func startWorker(settings: AppSettings, openChat: @escaping @MainActor () -> Int64?) {
+        guard worker == nil else { rerunRequested = true; return }
+        worker = Task { [weak self] in
             await self?.run(settings: settings, openChat: openChat)
+            guard let self else { return }
+            self.worker = nil
+            if self.rerunRequested {
+                self.rerunRequested = false
+                self.schedule(settings: settings, openChat: openChat)
+            }
         }
     }
 
@@ -135,7 +162,8 @@ final class BackgroundSorter {
             saved.newestRowId = freshIDs.max() ?? saved.newestRowId
         }
         // Opened while we were working? The open view owns it now.
-        guard openChat() != chat else { return }
+        // Removed meanwhile? Then nothing is saved and no reminders return.
+        guard openChat() != chat, settings.followedChats.contains(chat) else { return }
         try? SegmentationCache.save(saved, chatId: chat)
         // New or settled follow-ups: keep their reminders in step.
         reminderSync(saved.loops, chat, conversationName(chat), settings)

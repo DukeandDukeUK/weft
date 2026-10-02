@@ -499,4 +499,135 @@ final class WeftTests: XCTestCase {
         XCTAssertFalse(vm.topics.contains { $0.title.trimmingCharacters(in: .whitespaces).isEmpty }, "an untitled topic was created")
         XCTAssertEqual(vm.topics.first { $0.id == b.id }?.messageIds, [1, 2, 3])
     }
+
+    // MARK: - 0.2.5 fixes (Astra's 0.2.4 review)
+
+    // Opening a conversation that was never sorted actually starts its
+    // first sort (here: asks for consent) — the message watch used to cancel it.
+    func testOpeningConversationStartsItsFirstSort() async throws {
+        let chat: Int64 = 1_600
+        let path = try fixtureDB([(1, chat, "hi", nil, false), (2, chat, "hello", nil, true)])
+        let vm = WeftViewModel()
+        vm.reader = ChatDBReader(path: path)
+        vm.background.reader = vm.reader
+        let before = (vm.settings.followedChats, vm.settings.selectedChatRowID)
+        defer { vm.settings.followedChats = before.0; vm.settings.selectedChatRowID = before.1 }
+        await vm.selectChat(ChatInfo(id: chat, participants: "x", messageCount: 2, lastDate: nil, lastSnippet: nil))
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(vm.messages.map(\.id), [1, 2])
+        XCTAssertEqual(vm.firstSortRequest?.id, chat, "the first sort was cancelled before it started")
+    }
+
+    private func backgroundFixture(chat: Int64) throws -> (BackgroundSorter, AppSettings, () -> Void) {
+        let path = try fixtureDB((1...4).map { (Int64($0), chat, "message \($0)", nil, false) })
+        let settings = AppSettings.shared
+        settings.provider = .ollama
+        settings.setModel("test-model", for: .ollama)
+        settings.grantConsent(chat)
+        let before = settings.followedChats
+        settings.followedChats = [chat]
+        try SegmentationCache.save(CachedAnalysis(messageCount: 0, newestRowId: 0, generatedAt: Date(),
+            topics: [Topic(id: UUID(), title: "Old", summary: "", messageIds: [0])], loops: []), chatId: chat)
+        let bg = BackgroundSorter()
+        bg.reader = ChatDBReader(path: path)
+        bg.debounce = 0.05
+        return (bg, settings, { settings.followedChats = before; settings.provider = .claude })
+    }
+
+    // A slow AI (e.g. a local model) isn't interrupted by new activity: the
+    // pass finishes and the conversation's checkpoint moves forward.
+    func testSlowBackgroundSortSurvivesNewActivity() async throws {
+        let chat: Int64 = 1_700
+        let (bg, settings, restore) = try backgroundFixture(chat: chat)
+        defer { restore() }
+        var calls = 0
+        LLMClient.testResponder = { _, _ in
+            calls += 1
+            try await Task.sleep(nanoseconds: 400_000_000)
+            return #"{"assignments":[{"start":0,"end":3,"topic":0}],"newLoops":[],"resolvedLoops":[]}"#
+        }
+        bg.reminderSync = { _, _, _, _ in }
+        bg.schedule(settings: settings) { nil }
+        try await Task.sleep(nanoseconds: 150_000_000)        // the AI is now working
+        for _ in 0..<4 {                                       // polls keep coming
+            bg.schedule(settings: settings) { nil }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        try await Task.sleep(nanoseconds: 800_000_000)
+        XCTAssertEqual(SegmentationCache.load(chatId: chat)?.newestRowId, 4, "the slow pass was cancelled")
+        XCTAssertEqual(calls, 1, "the queued re-check should find nothing left to send")
+    }
+
+    // Removing a conversation while its background sort is running: nothing
+    // is saved and its reminders don't come back.
+    func testRemovalDuringBackgroundSortSavesNothing() async throws {
+        let chat: Int64 = 1_800
+        let (bg, settings, restore) = try backgroundFixture(chat: chat)
+        defer { restore() }
+        LLMClient.testResponder = { _, _ in
+            try await Task.sleep(nanoseconds: 300_000_000)
+            return #"{"assignments":[{"start":0,"end":3,"topic":0}],"newLoops":[{"title":"Pay rent","detail":"","message":0}],"resolvedLoops":[]}"#
+        }
+        var synced = false
+        bg.reminderSync = { _, _, _, _ in synced = true }
+        let run = Task { await bg.run(settings: settings) { nil } }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        settings.followedChats = []                            // removed mid-sort
+        await run.value
+        XCTAssertFalse(synced, "reminders came back for a removed conversation")
+        XCTAssertEqual(SegmentationCache.load(chatId: chat)?.newestRowId, 0, "a removed conversation was saved")
+    }
+
+    // Your reply sent inside a topic goes straight into it AND is checked
+    // for follow-ups ("I'll send the contract tomorrow").
+    func testReplyInTopicIsCheckedForFollowUps() async throws {
+        let chat: Int64 = 1_900
+        let promise = "I'll send the contract tomorrow"
+        let path = try fixtureDB([(1, chat, "Can you send the contract?", nil, false), (2, chat, promise, nil, true)])
+        var sentToAI = ""
+        LLMClient.testResponder = { _, input in
+            sentToAI = input
+            return #"{"assignments":[{"start":0,"end":0,"topic":1}],"newLoops":[{"title":"Send the contract","detail":"","message":0,"owner":"me"}],"resolvedLoops":[]}"#
+        }
+        let vm = WeftViewModel()
+        vm.reader = ChatDBReader(path: path)
+        vm.background.reader = vm.reader
+        vm.chats = [ChatInfo(id: chat, participants: "x", messageCount: 2, lastDate: nil, lastSnippet: nil)]
+        let before = vm.settings.selectedChatRowID
+        defer { vm.settings.selectedChatRowID = before }
+        vm.settings.selectedChatRowID = chat
+        vm.settings.grantConsent(chat)
+        let a = Topic(id: UUID(), title: "Contract", summary: "", messageIds: [1])
+        let b = Topic(id: UUID(), title: "Other", summary: "", messageIds: [0])
+        vm.messages = [msg(1)]                              // seen through 1
+        vm.topics = [a, b]
+        vm.noteReplySent(inTopic: a.id, text: promise)
+        await vm.pollOnce()
+        XCTAssertEqual(vm.topics.first { $0.id == a.id }?.messageIds, [1, 2], "reply wasn't filed in its topic")
+        try await Task.sleep(nanoseconds: 3_600_000_000)
+        XCTAssertTrue(sentToAI.contains(promise), "the reply was never checked")
+        XCTAssertTrue(vm.loops.contains { $0.title == "Send the contract" && $0.owner == .me })
+        XCTAssertEqual(vm.topics.first { $0.id == a.id }?.messageIds, [1, 2], "the check moved the reply")
+        XCTAssertTrue(vm.followUpQueue.isEmpty)
+    }
+
+    // Search notices when a message's stored text changes (edited message).
+    func testSearchSeesEditedRichText() async throws {
+        let old = try NSKeyedArchiver.archivedData(withRootObject: NSAttributedString(string: "Dinner at six"), requiringSecureCoding: false)
+        let path = try fixtureDB([(1, 9, nil, old, false)])
+        let reader = ChatDBReader(path: path)
+        let first = try await reader.search("six", inChats: [9])
+        XCTAssertEqual(first.map(\.message.id), [1])
+        let new = try NSKeyedArchiver.archivedData(withRootObject: NSAttributedString(string: "Dinner at seven"), requiringSecureCoding: false)
+        var db: OpaquePointer?
+        sqlite3_open(path, &db)
+        var stmt: OpaquePointer?
+        sqlite3_prepare_v2(db, "UPDATE message SET attributedBody = ? WHERE ROWID = 1", -1, &stmt, nil)
+        _ = new.withUnsafeBytes { sqlite3_bind_blob(stmt, 1, $0.baseAddress, Int32(new.count), unsafeBitCast(-1, to: sqlite3_destructor_type.self)) }
+        sqlite3_step(stmt); sqlite3_finalize(stmt); sqlite3_close(db)
+        let edited = try await reader.search("seven", inChats: [9])
+        XCTAssertEqual(edited.map(\.message.id), [1], "search kept the old text")
+        let stale = try await reader.search("six", inChats: [9])
+        XCTAssertTrue(stale.isEmpty)
+    }
 }

@@ -61,7 +61,7 @@ actor ChatDBReader {
 
     /// Decoded rich-text bodies (messages whose text is only in
     /// attributedBody), kept for the session so repeat searches are fast.
-    private var decodedText: [Int64: String] = [:]
+    private var decodedText: [Int64: (stamp: Int, text: String)] = [:]
 
     enum ReaderError: Error, LocalizedError {
         case noDatabase
@@ -280,13 +280,15 @@ actor ChatDBReader {
             for c in chats { sqlite3_bind_int64(stmt, i, c); i += 1 }
         }) { stmt in
             let id = columnInt64(stmt, 0)
+            guard let blob = columnBlob(stmt, 2) else { return nil }
+            // Re-decode if the stored body changed (e.g. an edited message).
+            let stamp = blob.hashValue
             let body: String
-            if let known = cache[id] {
-                body = known
+            if let known = cache[id], known.stamp == stamp {
+                body = known.text
             } else {
-                guard let blob = columnBlob(stmt, 2) else { return nil }
                 body = AttributedBodyParser.string(from: blob) ?? ""
-                cache[id] = body
+                cache[id] = (stamp, body)
             }
             guard body.localizedCaseInsensitiveContains(q) else { return nil }
             return row(stmt, body: body)

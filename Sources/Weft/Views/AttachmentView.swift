@@ -9,11 +9,20 @@ import SwiftUI
 struct AttachmentView: View {
     let attachment: Attachment
     @State private var thumbnail: NSImage?
+    @State private var previewFailed = false
+    @State private var retry = 0
 
     var body: some View {
         Group {
             if attachment.isMissing {
                 chip(symbol: "icloud.and.arrow.down", text: "\(attachment.name) — not downloaded to this Mac yet")
+            } else if (attachment.isImage || attachment.isVideo) && previewFailed {
+                HStack(spacing: 8) {
+                    chip(symbol: attachment.isVideo ? "film" : "photo", text: attachment.name)
+                    Button("Open") { NSWorkspace.shared.open(attachment.url) }
+                    Button("Retry Preview") { previewFailed = false; retry += 1 }
+                }
+                .controlSize(.small)
             } else if attachment.isImage || attachment.isVideo {
                 ZStack {
                     if let thumbnail {
@@ -36,7 +45,7 @@ struct AttachmentView: View {
                 .onTapGesture { NSWorkspace.shared.open(attachment.url) }
                 .accessibilityLabel(attachment.isVideo ? "Video: \(attachment.name)" : "Photo: \(attachment.name)")
                 .accessibilityAddTraits(.isButton)
-                .task(id: attachment.id) { await loadThumbnail() }
+                .task(id: "\(attachment.id)-\(retry)") { await loadThumbnail() }
             } else {
                 chip(symbol: "doc", text: attachment.name)
                     .onTapGesture { NSWorkspace.shared.open(attachment.url) }
@@ -70,6 +79,8 @@ struct AttachmentView: View {
         )
         if let rep = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request) {
             thumbnail = rep.nsImage
+        } else {
+            previewFailed = true
         }
     }
 }
