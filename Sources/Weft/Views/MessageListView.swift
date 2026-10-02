@@ -184,10 +184,15 @@ struct MessageRow: View {
                 }
                 VStack(alignment: message.isFromMe ? .trailing : .leading, spacing: 4) {
                     ForEach(message.attachments) { AttachmentView(attachment: $0) }
-                    // A photo-only message has placeholder text; don't show it.
-                    if message.attachments.isEmpty || message.text != "[attachment]" {
-                        Text(message.text)
+                    // A photo-only message has placeholder text, and a shared
+                    // link's text is just the address its card shows: don't
+                    // repeat them.
+                    if (message.attachments.isEmpty || message.text != "[attachment]")
+                        && !(message.link.map { LinkText.isJustTheLink(message.text, $0.url) } ?? false) {
+                        Text(LinkText.attributed(message.text))
                             .textSelection(.enabled)
+                            // Links in your (indigo) bubbles stay white, underlined.
+                            .tint(message.isFromMe ? Color.white : WeftStyle.accent)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 9)
                             .background(message.isFromMe ? WeftStyle.myBubble : WeftStyle.theirBubble,
@@ -196,6 +201,7 @@ struct MessageRow: View {
                             // color is slightly see-through and loses contrast on gray.
                             .foregroundStyle(message.isFromMe ? Color.white : WeftStyle.theirText)
                     }
+                    if let link = message.link { LinkPreviewCard(link: link) }
                 }
                     // Reactions sit on the bubble's own top corner, like
                     // Messages (attached before the width limit, so they

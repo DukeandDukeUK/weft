@@ -813,4 +813,55 @@ final class WeftTests: XCTestCase {
         let n = try TopicFiler.parse(noise, newMessages: [msg(10, "i'll tell them", me: true), msg(11, "ok")], topics: [], openLoops: [])
         XCTAssertEqual(n.newLoops.count, 1)
     }
+
+    // MARK: - 0.3.0 link previews
+
+    // Web addresses in message text are clickable.
+    func testLinksInTextAreClickable() {
+        let a = LinkText.attributed("see https://example.com/page and example.org")
+        let links = a.runs.compactMap(\.link)
+        XCTAssertEqual(links.first?.absoluteString, "https://example.com/page")
+        XCTAssertEqual(links.count, 2)
+        XCTAssertTrue(LinkText.attributed("no links here").runs.allSatisfy { $0.link == nil })
+        XCTAssertTrue(LinkText.isJustTheLink(" https://www.example.com/page/ ", URL(string: "https://example.com/page")!))
+        XCTAssertFalse(LinkText.isJustTheLink("look at this https://example.com", URL(string: "https://example.com")!))
+    }
+
+    // Messages' saved link preview is read without creating anything else
+    // from the archive; a preview with an unexpected type is just skipped.
+    func testLinkPreviewIsReadFromMessagesArchive() throws {
+        let archiver = NSKeyedArchiver(requiringSecureCoding: false)
+        archiver.setClassName("RichLink", for: FakeRichLink.self)
+        archiver.setClassName("LPLinkMetadata", for: FakeMetadata.self)
+        archiver.setClassName("RichLinkImageAttachmentSubstitute", for: FakeImage.self)
+        archiver.encode(FakeRichLink(), forKey: NSKeyedArchiveRootObjectKey)
+        archiver.finishEncoding()
+        let parsed = LinkPreviewParser.parse(archiver.encodedData)
+        XCTAssertEqual(parsed, .init(url: URL(string: "https://example.com/a")!, title: "A page", site: "Example", imageIndex: 1))
+        XCTAssertNil(LinkPreviewParser.parse(Data("not an archive".utf8)))
+        let other = try NSKeyedArchiver.archivedData(withRootObject: NSDate(), requiringSecureCoding: false)
+        XCTAssertNil(LinkPreviewParser.parse(other))
+    }
+}
+
+@objc(WeftFakeImage) private final class FakeImage: NSObject, NSCoding {
+    override init() {}
+    required init?(coder: NSCoder) {}
+    func encode(with coder: NSCoder) { coder.encode(1, forKey: "richLinkImageAttachmentSubstituteIndex") }
+}
+@objc(WeftFakeMetadata) private final class FakeMetadata: NSObject, NSCoding {
+    override init() {}
+    required init?(coder: NSCoder) {}
+    func encode(with coder: NSCoder) {
+        coder.encode(NSURL(string: "https://example.com/a"), forKey: "URL")
+        coder.encode("A page" as NSString, forKey: "title")
+        coder.encode("Example" as NSString, forKey: "siteName")
+        coder.encode(FakeImage(), forKey: "image")
+        coder.encode(NSDate(), forKey: "somethingElse")
+    }
+}
+@objc(WeftFakeRichLink) private final class FakeRichLink: NSObject, NSCoding {
+    override init() {}
+    required init?(coder: NSCoder) {}
+    func encode(with coder: NSCoder) { coder.encode(FakeMetadata(), forKey: "richLinkMetadata") }
 }

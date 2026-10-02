@@ -19,6 +19,8 @@ struct ChatMessage: Identifiable, Sendable, Hashable {
     var senderName: String = ""
     /// Photos, videos and files sent with it.
     var attachments: [Attachment] = []
+    /// Preview card for a shared link (title, website, image).
+    var link: LinkPreview? = nil
 
     /// Label used in transcripts sent to the AI: "You", the sender's name
     /// (group chats, known contacts), or "Them".

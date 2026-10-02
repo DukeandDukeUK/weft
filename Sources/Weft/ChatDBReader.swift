@@ -325,6 +325,48 @@ actor ChatDBReader {
         return Dictionary(grouping: rows, by: \.0).mapValues { $0.map(\.1) }
     }
 
+    /// Link previews Messages saved for link messages newer than `after`.
+    func fetchLinkPreviews(chatRowID: Int64, after: Int64 = 0) throws -> [Int64: LinkPreview] {
+        let payloads: [(Int64, Data)] = try query("""
+            SELECT m.ROWID, m.payload_data
+              FROM message m
+              JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+             WHERE cmj.chat_id = ? AND m.ROWID > ?
+               AND m.balloon_bundle_id = 'com.apple.messages.URLBalloonProvider'
+               AND m.payload_data IS NOT NULL
+            """, bind: { stmt in
+                sqlite3_bind_int64(stmt, 1, chatRowID)
+                sqlite3_bind_int64(stmt, 2, after)
+            }) { stmt in columnBlob(stmt, 1).map { (columnInt64(stmt, 0), $0) } }
+        guard !payloads.isEmpty else { return [:] }
+        // The preview's images are saved as hidden files on the message,
+        // in order; the preview refers to them by position.
+        let home = NSHomeDirectory()
+        let files: [(Int64, String)] = try query("""
+            SELECT maj.message_id, a.filename
+              FROM attachment a
+              JOIN message_attachment_join maj ON maj.attachment_id = a.ROWID
+              JOIN chat_message_join cmj ON cmj.message_id = maj.message_id
+             WHERE cmj.chat_id = ? AND maj.message_id > ?
+               AND a.filename LIKE '%.pluginPayloadAttachment'
+             ORDER BY maj.message_id, a.ROWID
+            """, bind: { stmt in
+                sqlite3_bind_int64(stmt, 1, chatRowID)
+                sqlite3_bind_int64(stmt, 2, after)
+            }) { stmt in
+                columnString(stmt, 1).map { raw in (columnInt64(stmt, 0), raw.hasPrefix("~") ? home + raw.dropFirst() : raw) }
+            }
+        let filesByMessage = Dictionary(grouping: files, by: \.0).mapValues { $0.map(\.1) }
+        var result: [Int64: LinkPreview] = [:]
+        for (id, data) in payloads {
+            guard let parsed = LinkPreviewParser.parse(data) else { continue }
+            let mine = filesByMessage[id] ?? []
+            let image = parsed.imageIndex.flatMap { mine.indices.contains($0) ? mine[$0] : nil }
+            result[id] = LinkPreview(url: parsed.url, title: parsed.title, site: parsed.site, imagePath: image)
+        }
+        return result
+    }
+
     /// Newest real message (not a reaction) in a conversation — for the
     /// "new messages" dot on conversations you aren't looking at.
     func latestMessageRowID(chatRowID: Int64) throws -> Int64 {

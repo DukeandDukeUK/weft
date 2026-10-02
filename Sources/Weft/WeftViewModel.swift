@@ -888,11 +888,13 @@ final class WeftViewModel {
 
     /// Attach photos and files to their messages.
     static func withAttachments(_ messages: [ChatMessage], chat: Int64, after: Int64 = 0, reader: ChatDBReader = .shared) async -> [ChatMessage] {
-        guard let byMessage = try? await reader.fetchAttachments(chatRowID: chat, after: after),
-              !byMessage.isEmpty else { return messages }
+        let byMessage = (try? await reader.fetchAttachments(chatRowID: chat, after: after)) ?? [:]
+        let links = (try? await reader.fetchLinkPreviews(chatRowID: chat, after: after)) ?? [:]
+        guard !byMessage.isEmpty || !links.isEmpty else { return messages }
         return messages.map { m in
             var m = m
             m.attachments = byMessage[m.id] ?? []
+            m.link = links[m.id]
             return m
         }
     }

@@ -84,3 +84,59 @@ struct AttachmentView: View {
         }
     }
 }
+
+// MARK: - LinkPreviewCard
+
+/// A shared link, shown like Messages does: image, title and website.
+/// Click to open it in your browser.
+struct LinkPreviewCard: View {
+    let link: LinkPreview
+    @State private var image: NSImage?
+
+    var body: some View {
+        Button { NSWorkspace.shared.open(link.url) } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                if let image {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 300, height: min(170, 300 * image.size.height / max(image.size.width, 1)))
+                        .clipped()
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(link.title.isEmpty ? link.url.absoluteString : link.title)
+                        .font(.callout.weight(.semibold))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    Text(link.site)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(width: 300)
+            .foregroundStyle(WeftStyle.theirText)
+            .background(WeftStyle.theirBubble)
+            .clipShape(RoundedRectangle(cornerRadius: WeftStyle.bubbleRadius, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: WeftStyle.bubbleRadius, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help(link.url.absoluteString)
+        .contextMenu {
+            Button("Open Link") { NSWorkspace.shared.open(link.url) }
+            Button("Copy Link") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(link.url.absoluteString, forType: .string)
+            }
+        }
+        .accessibilityLabel("Link: \(link.title.isEmpty ? link.site : link.title), \(link.site)")
+        .accessibilityAddTraits(.isLink)
+        .task(id: link.imagePath) {
+            guard let path = link.imagePath else { return }
+            image = await Task.detached { NSImage(contentsOfFile: path) }.value
+        }
+    }
+}
