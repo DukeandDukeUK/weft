@@ -52,6 +52,8 @@ struct SettingsView: View {
 
             AISettingsSection(viewModel: viewModel)
 
+            TokenUseSection()
+
             Section("Permissions") {
                 permissionRow(
                     title: "Full Disk Access",

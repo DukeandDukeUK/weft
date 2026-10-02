@@ -197,24 +197,29 @@ struct LLMClient: Sendable {
 
     var transcriptCharLimit: Int { provider.transcriptCharLimit }
 
-    func complete(systemPrompt: String, userPrompt: String) async throws -> String {
+    /// Runs one call and records its token use in the token log.
+    func complete(systemPrompt: String, userPrompt: String, purpose: CallPurpose = .other) async throws -> String {
+        let reply: String
+        let usage: TokenUsage?
         switch provider {
         case .claude, .codex, .gemini, .grok:
             let p = provider, m = model, e = effort
-            return try await Task.detached(priority: .userInitiated) {
+            (reply, usage) = try await Task.detached(priority: .userInitiated) {
                 try CLIRunner.run(provider: p, model: m, effort: e, systemPrompt: systemPrompt, input: userPrompt)
             }.value
         case .ollama, .lmstudio:
             guard !model.isEmpty else { throw ClientError.noLocalModel(provider) }
-            return try await LocalServer.complete(provider: provider, model: model, systemPrompt: systemPrompt, userPrompt: userPrompt)
+            (reply, usage) = try await LocalServer.complete(provider: provider, model: model, systemPrompt: systemPrompt, userPrompt: userPrompt)
         }
+        TokenLog.record(purpose: purpose, provider: provider, model: model, usage: usage)
+        return reply
     }
 
     /// A tiny prompt that should come back as "ok" — proves the tool is
     /// installed AND signed in (or the local server is up with that model).
     func testConnection() async -> Result<String, Error> {
         do {
-            let reply = try await complete(systemPrompt: "Reply with exactly: ok", userPrompt: "ping")
+            let reply = try await complete(systemPrompt: "Reply with exactly: ok", userPrompt: "ping", purpose: .connectionTest)
             let modelLabel = model.isEmpty ? "default model" : model
             return .success("Connected — \(modelLabel) replied \"\(reply.prefix(40))\".")
         } catch {
@@ -226,7 +231,8 @@ struct LLMClient: Sendable {
 // MARK: - Subscription CLIs
 
 enum CLIRunner {
-    static func run(provider: Provider, model: String, effort: String, systemPrompt: String, input: String) throws -> String {
+    /// Returns the reply and, where the tool reports them, its token counts.
+    static func run(provider: Provider, model: String, effort: String, systemPrompt: String, input: String) throws -> (String, TokenUsage?) {
         guard let name = provider.executableName, let path = CommandLocator.find(name) else {
             throw LLMClient.ClientError.notInstalled(provider)
         }
@@ -252,7 +258,8 @@ enum CLIRunner {
                 "--strict-mcp-config",
                 "--setting-sources", "",
                 "--no-session-persistence",
-                "--output-format", "text",
+                // JSON carries the reply plus its token counts.
+                "--output-format", "json",
                 "--effort", effort,
             ]
             let m = model.isEmpty ? provider.defaultModel : model
@@ -346,22 +353,77 @@ enum CLIRunner {
         }
 
         switch provider {
+        case .claude:
+            return try parseClaude(out)
         case .codex:
-            // Codex writes only the final answer to the -o file.
+            // Codex writes only the final answer to the -o file. It doesn't report token counts.
             let reply = (try? String(contentsOf: outputURL, encoding: .utf8)) ?? out
-            return reply.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (reply.trimmingCharacters(in: .whitespacesAndNewlines), nil)
         case .gemini:
             // JSON output keeps status lines out of the answer.
             struct GeminiJSON: Decodable { let response: String? }
             if let data = out.data(using: .utf8),
                let decoded = try? JSONDecoder().decode(GeminiJSON.self, from: data),
                let response = decoded.response {
-                return response.trimmingCharacters(in: .whitespacesAndNewlines)
+                return (response.trimmingCharacters(in: .whitespacesAndNewlines), geminiUsage(data))
             }
-            return out
+            return (out, nil)
         default:
-            return out
+            return (out, nil)
         }
+    }
+
+    /// `claude -p --output-format json`: {"result": "...", "is_error": false,
+    /// "usage": {"input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "output_tokens"}}.
+    private static func parseClaude(_ out: String) throws -> (String, TokenUsage?) {
+        struct Usage: Decodable {
+            let input_tokens: Int?
+            let cache_read_input_tokens: Int?
+            let cache_creation_input_tokens: Int?
+            let output_tokens: Int?
+        }
+        struct Reply: Decodable {
+            let result: String?
+            let is_error: Bool?
+            let usage: Usage?
+        }
+        guard let data = out.data(using: .utf8),
+              let reply = try? JSONDecoder().decode(Reply.self, from: data) else {
+            // Not JSON (older tool?): treat the whole output as the answer.
+            return (out, nil)
+        }
+        let text = (reply.result ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if reply.is_error == true {
+            throw LLMClient.ClientError.failed(.claude, exitCode: 0, message: text)
+        }
+        let usage = reply.usage.map {
+            TokenUsage(
+                input: $0.input_tokens ?? 0,
+                cachedInput: ($0.cache_read_input_tokens ?? 0) + ($0.cache_creation_input_tokens ?? 0),
+                output: $0.output_tokens ?? 0
+            )
+        }
+        return (text, usage)
+    }
+
+    /// Gemini CLI JSON: "stats": {"models": {"<model>": {"tokens": {"prompt", "candidates", "cached", ...}}}}.
+    /// Read loosely; nil if the shape isn't there.
+    private static func geminiUsage(_ data: Data) -> TokenUsage? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let stats = root["stats"] as? [String: Any],
+              let models = stats["models"] as? [String: Any], !models.isEmpty else { return nil }
+        var total = TokenUsage.zero
+        for case let model as [String: Any] in models.values {
+            guard let tokens = model["tokens"] as? [String: Any] else { continue }
+            let prompt = tokens["prompt"] as? Int ?? 0
+            let cached = tokens["cached"] as? Int ?? 0
+            total = total + TokenUsage(
+                input: max(prompt - cached, 0),
+                cachedInput: cached,
+                output: (tokens["candidates"] as? Int ?? 0) + (tokens["thoughts"] as? Int ?? 0)
+            )
+        }
+        return total
     }
 
     private static func combined(_ system: String, _ input: String) -> String {
@@ -398,7 +460,7 @@ enum LocalServer {
         }
     }
 
-    static func complete(provider: Provider, model: String, systemPrompt: String, userPrompt: String) async throws -> String {
+    static func complete(provider: Provider, model: String, systemPrompt: String, userPrompt: String) async throws -> (String, TokenUsage?) {
         guard let base = provider.localBaseURL else { throw LLMClient.ClientError.badPayload("no server address") }
         let messages = [
             ["role": "system", "content": systemPrompt],
@@ -442,20 +504,31 @@ enum LocalServer {
         switch provider {
         case .ollama:
             struct Message: Decodable { let content: String }
-            struct Reply: Decodable { let message: Message }
+            struct Reply: Decodable {
+                let message: Message
+                let prompt_eval_count: Int?
+                let eval_count: Int?
+            }
             guard let reply = try? JSONDecoder().decode(Reply.self, from: data) else {
                 throw LLMClient.ClientError.badPayload("couldn't read Ollama's reply")
             }
-            return stripThinking(reply.message.content)
+            let usage = (reply.prompt_eval_count != nil || reply.eval_count != nil)
+                ? TokenUsage(input: reply.prompt_eval_count ?? 0, cachedInput: 0, output: reply.eval_count ?? 0)
+                : nil
+            return (stripThinking(reply.message.content), usage)
         default:
             struct Message: Decodable { let content: String }
             struct Choice: Decodable { let message: Message }
-            struct Reply: Decodable { let choices: [Choice] }
+            struct Usage: Decodable { let prompt_tokens: Int?; let completion_tokens: Int? }
+            struct Reply: Decodable { let choices: [Choice]; let usage: Usage? }
             guard let reply = try? JSONDecoder().decode(Reply.self, from: data),
                   let first = reply.choices.first else {
                 throw LLMClient.ClientError.badPayload("couldn't read LM Studio's reply")
             }
-            return stripThinking(first.message.content)
+            let usage = reply.usage.map {
+                TokenUsage(input: $0.prompt_tokens ?? 0, cachedInput: 0, output: $0.completion_tokens ?? 0)
+            }
+            return (stripThinking(first.message.content), usage)
         }
     }
 

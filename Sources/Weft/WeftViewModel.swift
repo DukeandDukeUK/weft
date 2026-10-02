@@ -73,9 +73,10 @@ final class WeftViewModel {
     private var lastReactionRowID: Int64 = 0
     /// Where each pending message is shown until Claude files it.
     private var provisionalTopic: [Int64: UUID] = [:]
-    /// The thread you last replied in from this app. Your message and
-    /// the replies after it go straight into this thread (no sorting
-    /// call) until you reply elsewhere, send from your phone, or 30 minutes pass.
+    /// The thread you last replied in from this app. Your own reply goes
+    /// straight into it; replies after it are filed by Claude with this
+    /// thread as the likely home, until you reply elsewhere, send from your
+    /// phone, or 30 minutes pass.
     private var activeThread: (topicID: UUID, sentText: String, at: Date)?
 
     var selectedTopic: Topic? {
@@ -442,8 +443,9 @@ final class WeftViewModel {
 
     // MARK: - Automatic filing
 
-    /// Puts messages that belong to the thread you're replying in straight
-    /// into it. Returns the ones that still need Claude to file them.
+    /// Puts your own reply straight into the thread you sent it from.
+    /// Returns the messages that still need Claude to file them (others'
+    /// replies are filed with that thread as the likely home).
     private func fileIntoActiveThread(_ fresh: [ChatMessage]) -> [ChatMessage] {
         guard let thread = activeThread,
               Date().timeIntervalSince(thread.at) < 30 * 60,
@@ -460,8 +462,13 @@ final class WeftViewModel {
                 unfiled.append(contentsOf: fresh[offset...])
                 break
             }
-            if !topics[index].messageIds.contains(message.id) {
-                topics[index].messageIds.append(message.id)
+            // Your own reply from this thread: certain, no call needed.
+            if message.isFromMe {
+                if !topics[index].messageIds.contains(message.id) {
+                    topics[index].messageIds.append(message.id)
+                }
+            } else {
+                unfiled.append(message)
             }
         }
         sortTopicsByActivity()
@@ -536,7 +543,12 @@ final class WeftViewModel {
             .filter { $0.id < firstNew && !pendingMessageIDs.contains($0.id) }
             .suffix(12)
             .map { ($0, titleByMessage[$0.id] ?? "unsorted") }
-        let openTitles = loops.filter { $0.status == .open }.map(\.title)
+        let openLoops = loops.filter { $0.status == .open }
+        // Just replied in a thread? Point Claude at it (it can still pick another).
+        var preferred: Int?
+        if let thread = activeThread, Date().timeIntervalSince(thread.at) < 30 * 60 {
+            preferred = candidates.firstIndex(where: { $0.id == thread.topicID })
+        }
 
         // Filing is a simple job: low reasoning keeps it to a few seconds.
         guard var client = settings.makeClient() else {
@@ -549,7 +561,8 @@ final class WeftViewModel {
                 newMessages: batch,
                 context: Array(context),
                 topics: candidates,
-                openLoopTitles: openTitles
+                openLoops: openLoops,
+                preferredTopic: preferred
             )
             var filed = Set<Int64>()
             for a in result.assignments {
@@ -566,8 +579,8 @@ final class WeftViewModel {
 
             // Loops: add new ones, close the ones these messages resolved.
             loops = mergeLoops(result.newLoops)
-            let resolved = Set(result.resolvedLoopTitles.map { $0.lowercased() })
-            for i in loops.indices where loops[i].status == .open && resolved.contains(loops[i].title.lowercased()) {
+            let resolved = Set(result.resolvedLoopIDs)
+            for i in loops.indices where loops[i].status == .open && resolved.contains(loops[i].id) {
                 loops[i].status = .resolved
             }
 
@@ -661,9 +674,11 @@ final class WeftViewModel {
 
     // MARK: - Sending
 
-    func send(_ text: String) async {
+    /// Returns false if the message wasn't sent.
+    @discardableResult
+    func send(_ text: String) async -> Bool {
         var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, canSend, !isSending else { return }
+        guard !trimmed.isEmpty, canSend, !isSending else { return false }
         let handle = settings.selectedHandleId
         let groupChatGuid = isGroupChat ? selectedChat?.guid : nil
         let groupService = selectedChat?.service ?? ""
@@ -690,8 +705,10 @@ final class WeftViewModel {
             }.value
             await pollOnce() // pick up our own message quickly
             scrollToken += 1
+            return true
         } catch {
             notice = error.localizedDescription
+            return false
         }
     }
 

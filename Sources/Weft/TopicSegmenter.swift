@@ -42,7 +42,7 @@ struct TopicSegmenter: Sendable {
             - Merge brief digressions into the surrounding topic. Make one topic per distinct subject; a long transcript can have dozens of topics.
             - If the whole transcript is one topic, return a single object.
             """
-        let raw = try await client.complete(systemPrompt: system, userPrompt: transcript)
+        let raw = try await client.complete(systemPrompt: system, userPrompt: transcript, purpose: .fullSort)
         return try Self.parseTopics(from: raw, messages: numbered)
     }
 

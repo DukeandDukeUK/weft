@@ -80,7 +80,7 @@ final class BackgroundSorter {
             newMessages: fresh,
             context: context,
             topics: candidates,
-            openLoopTitles: saved.loops.filter { $0.status == .open }.map(\.title)
+            openLoops: saved.loops.filter { $0.status == .open }
         ) else { return } // try again on the next change
 
         var topics = saved.topics
@@ -103,8 +103,8 @@ final class BackgroundSorter {
         for loop in result.newLoops where !loops.contains(where: { $0.title.caseInsensitiveCompare(loop.title) == .orderedSame }) {
             loops.append(loop)
         }
-        let resolved = Set(result.resolvedLoopTitles.map { $0.lowercased() })
-        for i in loops.indices where loops[i].status == .open && resolved.contains(loops[i].title.lowercased()) {
+        let resolved = Set(result.resolvedLoopIDs)
+        for i in loops.indices where loops[i].status == .open && resolved.contains(loops[i].id) {
             loops[i].status = .resolved
         }
 

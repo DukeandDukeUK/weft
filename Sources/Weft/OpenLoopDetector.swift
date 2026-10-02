@@ -8,12 +8,14 @@ struct OpenLoopDetector: Sendable {
     private struct LoopDTO: Decodable {
         let title: String
         let detail: String
+        /// Transcript index of the message the loop comes from.
+        let message: Int?
     }
 
     let client: LLMClient
 
     func detect(messages: [ChatMessage]) async throws -> [OpenLoop] {
-        let (_, transcript) = TopicSegmenter.buildTranscript(messages: messages, maxTotalChars: client.transcriptCharLimit)
+        let (numbered, transcript) = TopicSegmenter.buildTranscript(messages: messages, maxTotalChars: client.transcriptCharLimit)
         let system = """
             You are reviewing a chat transcript between a person ("You") and one or more others (each line is labeled with who sent it; often an AI assistant).
             Find OPEN LOOPS:
@@ -23,9 +25,10 @@ struct OpenLoopDetector: Sendable {
             Return ONLY a JSON array — no markdown fences, no commentary — of objects with keys:
             "title": short title, 6 words max
             "detail": one or two sentences — what is pending and the last known state
+            "message": the [index] of the message where it was asked or promised
             If there are no open loops, return [].
             """
-        let raw = try await client.complete(systemPrompt: system, userPrompt: transcript)
+        let raw = try await client.complete(systemPrompt: system, userPrompt: transcript, purpose: .openLoops)
         let cleaned = TopicSegmenter.stripFences(raw)
         guard let data = cleaned.data(using: .utf8) else { return [] }
         let dtos = (try? JSONDecoder().decode([LoopDTO].self, from: data)) ?? []
@@ -37,7 +40,8 @@ struct OpenLoopDetector: Sendable {
                     title: dto.title.trimmingCharacters(in: .whitespacesAndNewlines),
                     detail: dto.detail.trimmingCharacters(in: .whitespacesAndNewlines),
                     status: .open,
-                    createdDate: now
+                    createdDate: now,
+                    sourceMessageId: dto.message.flatMap { numbered.indices.contains($0) ? numbered[$0].id : nil }
                 )
             }
             .filter { !$0.title.isEmpty }

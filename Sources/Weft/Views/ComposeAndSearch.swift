@@ -50,7 +50,11 @@ struct ComposeView: View {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         draft = ""
-        Task { await viewModel.send(text) }
+        Task {
+            // Failed send: put the text back so nothing is lost.
+            let sent = await viewModel.send(text)
+            if !sent && draft.isEmpty { draft = text }
+        }
     }
 }
 
@@ -130,6 +134,15 @@ struct LoopDetailView: View {
                 Text("Detected \(loop.createdDate, style: .date)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if let id = loop.sourceMessageId,
+                   let message = viewModel.messages.first(where: { $0.id == id }) {
+                    Button {
+                        viewModel.jumpToMessage(message)
+                    } label: {
+                        Label("Show message", systemImage: "text.bubble")
+                    }
+                    .glassButton()
+                }
                 Picker("Status", selection: Binding(
                     get: { loop.status },
                     set: { viewModel.setLoopStatus(loop, $0) }

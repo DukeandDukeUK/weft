@@ -19,7 +19,8 @@ struct TopicFiler: Sendable {
     struct Result: Sendable {
         var assignments: [Assignment]
         var newLoops: [OpenLoop]
-        var resolvedLoopTitles: [String]
+        /// Ids of the open loops (as passed in) these messages resolve.
+        var resolvedLoopIDs: [UUID]
     }
 
     private struct AssignmentDTO: Decodable {
@@ -55,12 +56,31 @@ struct TopicFiler: Sendable {
     private struct LoopDTO: Decodable {
         let title: String
         let detail: String
+        /// Index of the NEW message the loop comes from.
+        let message: Int?
+    }
+
+    /// A resolved loop, written as 3, "L3", or (older replies) its title.
+    private struct LoopRef: Decodable {
+        let number: Int?
+        let title: String?
+        init(from decoder: Decoder) throws {
+            let c = try decoder.singleValueContainer()
+            if let n = try? c.decode(Int.self) {
+                number = n; title = nil
+            } else {
+                let s = (try? c.decode(String.self)) ?? ""
+                let digits = s.trimmingCharacters(in: CharacterSet(charactersIn: "Ll "))
+                number = Int(digits)
+                title = number == nil ? s : nil
+            }
+        }
     }
 
     private struct ResponseDTO: Decodable {
         let assignments: [AssignmentDTO]
         let newLoops: [LoopDTO]?
-        let resolvedLoops: [String]?
+        let resolvedLoops: [LoopRef]?
     }
 
     let client: LLMClient
@@ -70,12 +90,15 @@ struct TopicFiler: Sendable {
     ///   - context: a few already-filed messages just before them, so short
     ///     replies ("yes, do that") land in the right topic.
     ///   - topics: candidate topics, most recently active first.
-    ///   - openLoopTitles: titles of loops currently open.
+    ///   - openLoops: loops currently open.
+    ///   - preferredTopic: index into `topics` of the thread you just replied
+    ///     in; new messages most likely continue it.
     func file(
         newMessages: [ChatMessage],
         context: [(ChatMessage, String)],
         topics: [Topic],
-        openLoopTitles: [String]
+        openLoops: [OpenLoop],
+        preferredTopic: Int? = nil
     ) async throws -> Result {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
@@ -94,7 +117,10 @@ struct TopicFiler: Sendable {
             for (m, title) in context { prompt += "- [\(title)] \(render(m))\n" }
         }
         prompt += "\nOPEN LOOPS:\n"
-        prompt += openLoopTitles.isEmpty ? "(none)\n" : openLoopTitles.map { "- \($0)" }.joined(separator: "\n") + "\n"
+        prompt += openLoops.isEmpty ? "(none)\n" : openLoops.enumerated().map { "L\($0.offset): \($0.element.title)" }.joined(separator: "\n") + "\n"
+        if let p = preferredTopic, topics.indices.contains(p) {
+            prompt += "\nThe person just replied in T\(p), so the new messages most likely continue it. File them in T\(p) unless a message clearly starts a different subject.\n"
+        }
         prompt += "\nNEW MESSAGES TO FILE:\n"
         for (i, m) in newMessages.enumerated() { prompt += "[\(i)] \(render(m))\n" }
 
@@ -106,12 +132,13 @@ struct TopicFiler: Sendable {
                "summary": a new one-sentence summary for Tk if these messages change its outcome; or
                {"start": i, "end": j, "newTitle": "...", "newSummary": "..."} to start a new topic
                (title 6 words max, specific; summary one sentence).
-            "newLoops": array of {"title", "detail"} for requests from You with no resolution yet, or promises from
-               the others not yet completed, that appear in the NEW messages and are not already in OPEN LOOPS. [] if none.
-            "resolvedLoops": array of OPEN LOOPS titles (copied exactly) that the NEW messages clearly resolve. [] if none.
+            "newLoops": array of {"title", "detail", "message"} for requests from You with no resolution yet, or promises from
+               the others not yet completed, that appear in the NEW messages and are not already in OPEN LOOPS.
+               "message" is the index of the NEW message it comes from. [] if none.
+            "resolvedLoops": array of OPEN LOOPS numbers (e.g. 2 for L2) that the NEW messages clearly resolve. [] if none.
             Use an existing topic when the new messages continue its subject; start a new topic only for a genuinely new subject.
             """
-        let raw = try await client.complete(systemPrompt: system, userPrompt: prompt)
+        let raw = try await client.complete(systemPrompt: system, userPrompt: prompt, purpose: .filing)
         let cleaned = TopicSegmenter.stripFences(raw)
         guard let data = cleaned.data(using: .utf8),
               let dto = try? JSONDecoder().decode(ResponseDTO.self, from: data) else {
@@ -142,10 +169,20 @@ struct TopicFiler: Sendable {
                 title: $0.title.trimmingCharacters(in: .whitespacesAndNewlines),
                 detail: $0.detail.trimmingCharacters(in: .whitespacesAndNewlines),
                 status: .open,
-                createdDate: now
+                createdDate: now,
+                sourceMessageId: $0.message.flatMap { newMessages.indices.contains($0) ? newMessages[$0].id : nil }
             )
         }.filter { !$0.title.isEmpty }
-        return Result(assignments: assignments, newLoops: loops, resolvedLoopTitles: dto.resolvedLoops ?? [])
+        var resolved: [UUID] = []
+        for ref in dto.resolvedLoops ?? [] {
+            if let n = ref.number, openLoops.indices.contains(n) {
+                resolved.append(openLoops[n].id)
+            } else if let t = ref.title?.lowercased(),
+                      let match = openLoops.first(where: { $0.title.lowercased() == t }) {
+                resolved.append(match.id)
+            }
+        }
+        return Result(assignments: assignments, newLoops: loops, resolvedLoopIDs: resolved)
     }
 }
 

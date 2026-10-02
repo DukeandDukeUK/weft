@@ -127,6 +127,8 @@ struct OpenLoop: Identifiable, Sendable, Hashable, Codable {
     var detail: String
     var status: LoopStatus
     var createdDate: Date
+    /// The message the loop came from (chat.db ROWID), when known.
+    var sourceMessageId: Int64? = nil
 }
 
 // MARK: - Sidebar selection

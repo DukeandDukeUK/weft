@@ -63,7 +63,7 @@ Sorting uses a small amount of your plan's usage each time new messages arrive. 
 - To sort, Weft sends the text of the conversations you added (and who sent each message) to the AI you chose, and nothing else. Each added conversation uses a little of your AI plan as new messages arrive. With Ollama or LM Studio, nothing leaves your Mac.
 - Weft has no account, no server, no analytics and no tracking. Topics and open loops are saved in `~/Library/Application Support/Weft/`.
 - At launch Weft contacts GitHub to check for updates and to read its model recommendations (`recommendations.json` in this project). GitHub sees your internet address; no messages or personal data are sent.
-- Contacts access is optional and only used to show names next to numbers on your Mac.
+- Contacts access is optional. Weft shows names next to numbers, and the names are also part of the text sent to the AI you chose, so it knows who said what. Without Contacts access, phone numbers and email addresses are sent instead. With Ollama or LM Studio, nothing leaves your Mac.
 
 ## Limitations
 
