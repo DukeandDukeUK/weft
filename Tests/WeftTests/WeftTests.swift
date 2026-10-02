@@ -730,4 +730,71 @@ final class WeftTests: XCTestCase {
         XCTAssertEqual(calls, 1, "resuming didn't check the waiting reply")
         XCTAssertTrue(vm.followUpQueue.isEmpty)
     }
+
+    // MARK: - 0.2.8 fixes (Astra's 0.2.7 review)
+
+    // A background sort that finishes after you edited the conversation
+    // (renamed a topic, completed a follow-up) doesn't undo the edit.
+    func testLateBackgroundSortKeepsYourEdits() async throws {
+        let chat: Int64 = 2_400
+        let (bg, settings, restore) = try backgroundFixture(chat: chat)
+        defer { restore() }
+        LLMClient.testResponder = { _, _ in
+            try await Task.sleep(nanoseconds: 300_000_000)
+            return #"{"assignments":[{"start":0,"end":3,"topic":0}],"newLoops":[],"resolvedLoops":[]}"#
+        }
+        var synced = false
+        bg.reminderSync = { _, _, _, _ in synced = true }
+        let run = Task { await bg.run(settings: settings) { nil } }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        // You open it, rename the topic, and switch away again.
+        var edited = try XCTUnwrap(SegmentationCache.load(chatId: chat))
+        edited.topics[0].title = "Renamed"
+        try SegmentationCache.save(edited, chatId: chat)
+        await run.value
+        XCTAssertEqual(SegmentationCache.load(chatId: chat)?.topics.first?.title, "Renamed", "the background result undid your rename")
+        XCTAssertFalse(synced)
+        // The next pass picks the work up from your edited version.
+        LLMClient.testResponder = { _, _ in #"{"assignments":[{"start":0,"end":3,"topic":0}],"newLoops":[],"resolvedLoops":[]}"# }
+        await bg.run(settings: settings) { nil }
+        XCTAssertEqual(SegmentationCache.load(chatId: chat)?.newestRowId, 4)
+        XCTAssertEqual(SegmentationCache.load(chatId: chat)?.topics.first?.title, "Renamed")
+    }
+
+    // Your topic reply that arrives during a full sort ends up in a topic
+    // afterwards (not left only in All Messages).
+    func testReplyDuringFullSortKeepsATopic() async throws {
+        let chat: Int64 = 2_500
+        let promise = "I'll bring the wine"
+        let path = try fixtureDB([(1, chat, "Dinner Friday?", nil, false), (2, chat, "Sounds good", nil, false), (3, chat, promise, nil, true)])
+        LLMClient.testResponder = { system, _ in
+            if system.contains("organizing a chat transcript") {
+                try await Task.sleep(nanoseconds: 300_000_000)
+                return #"[{"title":"Dinner","summary":"s","ranges":[[0,1]]}]"#
+            }
+            if system.contains("reviewing a chat transcript") { return "[]" }
+            return #"{"assignments":[{"start":0,"end":0,"topic":0}],"newLoops":[],"resolvedLoops":[]}"#
+        }
+        let vm = WeftViewModel()
+        vm.reader = ChatDBReader(path: path)
+        vm.background.reader = vm.reader
+        vm.chats = [ChatInfo(id: chat, participants: "x", messageCount: 3, lastDate: nil, lastSnippet: nil)]
+        let before = (vm.settings.selectedChatRowID, vm.settings.sortOlderHistory)
+        defer { vm.settings.selectedChatRowID = before.0; vm.settings.sortOlderHistory = before.1 }
+        vm.settings.selectedChatRowID = chat
+        vm.settings.sortOlderHistory = false                 // history sorting would mask the loss
+        vm.settings.grantConsent(chat)
+        let a = Topic(id: UUID(), title: "Old", summary: "", messageIds: [1, 2])
+        vm.messages = [msg(1), msg(2)]
+        vm.topics = [a]
+        vm.noteReplySent(inTopic: a.id, text: promise)
+        let sort = Task { await vm.analyze() }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        await vm.pollOnce()                                  // your reply lands mid-sort
+        await sort.value
+        try await Task.sleep(nanoseconds: 3_600_000_000)
+        XCTAssertTrue(vm.topics.contains { $0.messageIds.contains(3) }, "the reply lost its topic")
+        XCTAssertTrue(vm.pendingMessageIDs.isEmpty)
+        XCTAssertTrue(vm.followUpQueue.isEmpty)
+    }
 }

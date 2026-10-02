@@ -46,6 +46,14 @@ enum SegmentationCache {
         return try? JSONDecoder().decode(CachedAnalysis.self, from: data)
     }
 
+    /// Fingerprint of what's saved right now: changes with every save, so a
+    /// slow job can tell whether the conversation was edited while it ran.
+    static func revision(chatId: Int64) -> Int? {
+        guard let url = try? fileURL(chatId: chatId),
+              let data = try? Data(contentsOf: url) else { return nil }
+        return data.hashValue
+    }
+
     static func save(_ analysis: CachedAnalysis, chatId: Int64) throws {
         let url = try fileURL(chatId: chatId)
         let data = try JSONEncoder().encode(analysis)

@@ -101,6 +101,7 @@ final class BackgroundSorter {
     private func fileNew(chat: Int64, settings: AppSettings, openChat: @MainActor () -> Int64?) async {
         // Only conversations that have been sorted once (opened in Weft).
         // Only with your OK for this conversation and this destination.
+        let revision = SegmentationCache.revision(chatId: chat)
         guard settings.hasConsent(chat),
               var saved = SegmentationCache.load(chatId: chat), !saved.topics.isEmpty,
               var client = settings.makeClient() else { return }
@@ -163,7 +164,10 @@ final class BackgroundSorter {
         }
         // Opened while we were working? The open view owns it now.
         // Removed meanwhile? Then nothing is saved and no reminders return.
-        guard openChat() != chat, settings.followedChats.contains(chat) else { return }
+        // Edited meanwhile (renamed a topic, completed a follow-up…)? Don't
+        // overwrite that: drop this result, the next pass starts from the edit.
+        guard openChat() != chat, settings.followedChats.contains(chat),
+              SegmentationCache.revision(chatId: chat) == revision else { return }
         try? SegmentationCache.save(saved, chatId: chat)
         // New or settled follow-ups: keep their reminders in step.
         reminderSync(saved.loops, chat, conversationName(chat), settings)

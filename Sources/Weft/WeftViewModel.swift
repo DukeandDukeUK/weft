@@ -410,8 +410,11 @@ final class WeftViewModel {
             guard mySession == session else { return }
             let covered = Set(snapshot.map(\.id))
             topics = newTopics
-            // Anything that arrived during the sort is still pending.
+            // Anything that arrived during the sort is still pending —
+            // including your topic replies that were placed directly: their
+            // old topic is gone, so they're filed again.
             pendingMessageIDs = pendingMessageIDs.subtracting(covered)
+                .union(messages.lazy.filter { !covered.contains($0.id) }.map(\.id))
             provisionalTopic = provisionalTopic.filter { !covered.contains($0.key) }
             showProvisionally(messages.filter { pendingMessageIDs.contains($0.id) })
             sortTopicsByActivity()
