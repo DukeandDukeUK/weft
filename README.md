@@ -14,6 +14,7 @@ If you text an AI assistant (or your boss, or the family group) about everything
 - **Search** across the whole conversation.
 - **Reactions** (❤️ 👍 ✅ …) show on messages just like in Messages, including several people's in a group — click them to see who reacted.
 - **Contact names** next to phone numbers, if you allow Contacts access.
+- **Notifications.** A red count on Weft's Dock icon and next to each conversation, plus optional notifications with a sound you pick. Clicking one opens that conversation.
 - **Automatic updates.** Weft checks for new versions and offers to install them (Weft → Check for Updates…).
 - **Light, Dark or Automatic** appearance (Settings → Appearance).
 
