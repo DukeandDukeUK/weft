@@ -47,6 +47,10 @@ final class AppSettings {
     var notifyBanners: Bool { didSet { defaults.set(notifyBanners, forKey: Keys.notifyBanners) } }
     /// "default", "none", or a Mac alert sound name (e.g. "Glass").
     var notifySound: String { didSet { defaults.set(notifySound, forKey: Keys.notifySound) } }
+    /// After the first sort, keep sorting the older history that didn't fit.
+    var sortOlderHistory: Bool { didSet { defaults.set(sortOlderHistory, forKey: Keys.sortOlderHistory) } }
+    /// ChatGPT (Codex) Fast mode.
+    var codexFast: Bool { didSet { defaults.set(codexFast, forKey: Keys.codexFast) } }
     /// Red count on Weft's Dock icon.
     var dockBadge: Bool { didSet { defaults.set(dockBadge, forKey: Keys.dockBadge) } }
     /// The notifications step of first-time setup has been shown.
@@ -75,6 +79,8 @@ final class AppSettings {
         static let notifyBanners = "weft.notifyBanners"
         static let notifySound = "weft.notifySound"
         static let dockBadge = "weft.dockBadge"
+        static let codexFast = "weft.codexFast"
+        static let sortOlderHistory = "weft.sortOlderHistory"
         static let notifOnboarded = "weft.notificationsOnboarded"
         static let lastViewed = "weft.lastViewed"
     }
@@ -99,6 +105,8 @@ final class AppSettings {
         self.notifyBanners = d.object(forKey: Keys.notifyBanners) as? Bool ?? true
         self.notifySound = d.string(forKey: Keys.notifySound) ?? "default"
         self.dockBadge = d.object(forKey: Keys.dockBadge) as? Bool ?? true
+        self.codexFast = d.bool(forKey: Keys.codexFast)
+        self.sortOlderHistory = d.object(forKey: Keys.sortOlderHistory) as? Bool ?? true
         self.notificationsOnboarded = d.bool(forKey: Keys.notifOnboarded)
         Self.apply(appearance: appearance)
     }
@@ -143,6 +151,8 @@ final class AppSettings {
     /// Nil when no provider is set up yet.
     func makeClient() -> LLMClient? {
         guard let provider else { return nil }
-        return LLMClient(provider: provider, model: effectiveModel(for: provider))
+        var client = LLMClient(provider: provider, model: effectiveModel(for: provider))
+        client.fast = provider == .codex && codexFast
+        return client
     }
 }

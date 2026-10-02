@@ -6,7 +6,8 @@ If you text an AI assistant (or your boss, or the family group) about everything
 
 ![Weft showing a conversation sorted into threads](docs/screenshot-light.png)
 
-- **Threads, sorted automatically.** New messages are filed into the right thread a few seconds after they arrive, or a new thread is started.
+- **Threads, sorted automatically.** New messages are filed into the right thread a few seconds after they arrive, or a new thread is started. When a conversation comes back to an earlier subject, it lands in that same thread.
+- **Your whole history.** After the first sort, Weft keeps sorting the older part of a long conversation in the background (you can turn this off in Settings).
 - **Several conversations.** Add as many as you like with **+**, drag them into your own order, and right-click to remove one. All of them stay sorted in the background; a dot shows which have new messages.
 - **Group chats.** Each message shows who sent it, and the sorting knows who said what. Replies go to the whole group — including groups with Android members, sent as regular texts through your iPhone (turn on Text Message Forwarding).
 - **Reply inside a thread.** Your reply is sent through Messages as you. It starts with "Re: <thread> —", so the other side knows which subject you mean (you can turn this off).

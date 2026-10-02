@@ -24,6 +24,7 @@ struct TokenUsage: Sendable, Codable, Hashable {
 enum CallPurpose: String, Sendable, Codable {
     case fullSort = "Full sort"
     case filing = "Filing new messages"
+    case history = "Sorting older history"
     case openLoops = "Open loops"
     case connectionTest = "Connection test"
     case other = "Other"

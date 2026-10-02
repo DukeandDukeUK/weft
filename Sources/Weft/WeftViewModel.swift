@@ -16,6 +16,10 @@ final class WeftViewModel {
         settings.followedChats.compactMap { id in chats.first { $0.id == id } }
     }
 
+    /// Older-history sorting progress (nil when not running).
+    var historyProgress: (done: Int, total: Int)?
+    private var backfillTask: Task<Void, Never>?
+
     /// New incoming messages in the open conversation while Weft wasn't in front.
     var openUnread = 0
     /// First-time setup: the notifications step.
@@ -224,6 +228,7 @@ final class WeftViewModel {
             }
             scrollToken += 1
             startPolling()
+            startHistoryBackfill()
         } catch {
             notice = error.localizedDescription
         }
@@ -255,6 +260,9 @@ final class WeftViewModel {
         watcher = nil
         autoSortTask?.cancel()
         autoSortTask = nil
+        backfillTask?.cancel()
+        backfillTask = nil
+        historyProgress = nil
     }
 
     func pollOnce() async {
@@ -289,8 +297,10 @@ final class WeftViewModel {
             let unfiled = fileIntoActiveThread(fresh)
             if !unfiled.isEmpty {
                 showProvisionally(unfiled)
-                // Short pause so a burst of replies is filed in one call.
-                scheduleAutoSort(after: 3)
+                // Your own sent message: file it right away. Incoming
+                // messages: short pause so a burst of replies is filed in
+                // one call. (A reply that lands mid-filing waits its turn.)
+                scheduleAutoSort(after: unfiled.allSatisfy(\.isFromMe) ? 0 : 3)
             }
         } catch {
             // Polling failures are transient (e.g. DB briefly locked); don't
@@ -331,6 +341,104 @@ final class WeftViewModel {
             notice = "Sorting failed: \(error.localizedDescription)"
         }
         if !pendingMessageIDs.isEmpty { scheduleAutoSort(after: 3) }
+        startHistoryBackfill()
+    }
+
+    // MARK: - Older history
+
+    /// Messages in the open conversation that no thread holds yet (and that
+    /// aren't new messages waiting to be filed) — the part of a long
+    /// history the first sort couldn't fit.
+    private func unsortedHistory() -> [ChatMessage] {
+        let filed = Set(topics.flatMap(\.messageIds))
+        return messages.filter { !filed.contains($0.id) && !pendingMessageIDs.contains($0.id) }
+    }
+
+    /// Sort older history in the background, a chunk at a time, newest
+    /// first, into the existing threads (or new ones). New messages always
+    /// go first: this waits whenever something new is being filed.
+    func startHistoryBackfill() {
+        guard settings.sortOlderHistory, backfillTask == nil, !topics.isEmpty,
+              settings.selectedChatRowID != nil else { return }
+        let chatAtStart = settings.selectedChatRowID
+        backfillTask = Task { [weak self] in
+            await self?.runBackfill(chat: chatAtStart)
+            self?.backfillTask = nil
+            self?.historyProgress = nil
+        }
+    }
+
+    private func runBackfill(chat: Int64?) async {
+        let total = unsortedHistory().count
+        guard total > 0 else { return }
+        while !Task.isCancelled, settings.selectedChatRowID == chat, settings.sortOlderHistory {
+            let remaining = unsortedHistory()
+            if remaining.isEmpty { return }
+            historyProgress = (total - remaining.count, total)
+            // New messages first.
+            if isAnalyzing || !pendingMessageIDs.isEmpty {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                continue
+            }
+            guard var client = settings.makeClient() else { return }
+            client.effort = "low"
+
+            // Newest unsorted messages first, up to a size each AI can take.
+            let local = settings.provider?.isLocal ?? false
+            let maxCount = local ? 40 : 120
+            let maxChars = local ? 8_000 : 40_000
+            var chunk: [ChatMessage] = []
+            var chars = 0
+            for m in remaining.reversed() {
+                let size = min(m.text.count, 2_000) + 40
+                if !chunk.isEmpty && (chunk.count >= maxCount || chars + size > maxChars) { break }
+                chunk.append(m); chars += size
+            }
+            chunk.reverse()
+            guard let last = chunk.last else { return }
+
+            // Threads nearest in time to this chunk (the oldest sorted ones).
+            let candidates = Array(topics.sorted { ($0.messageIds.min() ?? 0) < ($1.messageIds.min() ?? 0) }.prefix(60))
+            let titleByID = Dictionary(candidates.flatMap { t in t.messageIds.map { ($0, t.title) } }, uniquingKeysWith: { a, _ in a })
+            let context = messages.filter { $0.id > last.id && titleByID[$0.id] != nil }.prefix(12)
+                .map { ($0, titleByID[$0.id]!) }
+
+            isAnalyzing = true
+            let result = try? await TopicFiler(client: client).file(
+                newMessages: chunk, context: Array(context), topics: candidates,
+                openLoops: [], purpose: .history
+            )
+            isAnalyzing = false
+            guard let result, !Task.isCancelled, settings.selectedChatRowID == chat else { return }
+
+            let already = Set(topics.flatMap(\.messageIds))
+            var placed = 0
+            for a in result.assignments {
+                let ids = a.messageIds.filter { !already.contains($0) }
+                guard !ids.isEmpty else { continue }
+                if let i = a.topicIndex, let target = topics.firstIndex(where: { $0.id == candidates[i].id }) {
+                    topics[target].messageIds.append(contentsOf: ids)
+                    topics[target].messageIds.sort()
+                } else {
+                    topics.append(Topic(id: UUID(), title: a.newTitle, summary: a.newSummary, messageIds: ids))
+                }
+                placed += ids.count
+            }
+            // Anything the AI skipped joins the thread of the message after it,
+            // so the loop always makes progress.
+            if placed < chunk.count {
+                let nowFiled = Set(topics.flatMap(\.messageIds))
+                for m in chunk.reversed() where !nowFiled.contains(m.id) {
+                    if let next = topics.firstIndex(where: { $0.messageIds.contains { $0 > m.id } }) {
+                        topics[next].messageIds.insert(m.id, at: 0)
+                        topics[next].messageIds.sort()
+                    }
+                }
+            }
+            sortTopicsByActivity()
+            let filedThrough = messages.map(\.id).filter { !pendingMessageIDs.contains($0) }.max() ?? 0
+            saveCache(filedThrough: filedThrough)
+        }
     }
 
     // MARK: - Better local model

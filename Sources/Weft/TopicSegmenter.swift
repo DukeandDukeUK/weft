@@ -18,11 +18,22 @@ struct TopicSegmenter: Sendable {
         }
     }
 
+    /// One topic: either a single start/end, or several "ranges" when the
+    /// conversation returns to the same subject later (A, B, then A again).
     private struct SegmentDTO: Decodable {
         let title: String
         let summary: String
-        let start: Int
-        let end: Int
+        let start: Int?
+        let end: Int?
+        let ranges: [[Int]]?
+
+        var spans: [(Int, Int)] {
+            if let ranges, !ranges.isEmpty {
+                return ranges.compactMap { r in r.count >= 2 ? (r[0], r[1]) : (r.count == 1 ? (r[0], r[0]) : nil) }
+            }
+            if let start, let end { return [(start, end)] }
+            return []
+        }
     }
 
     let client: LLMClient
@@ -35,12 +46,12 @@ struct TopicSegmenter: Sendable {
             Return ONLY a JSON array — no markdown fences, no commentary — of objects with keys:
             "title": short topic title, 6 words max, specific ("Bali visa paperwork", not "Discussion")
             "summary": one sentence on what happened and/or the outcome
-            "start": index of the first message in the topic
-            "end": index of the last message in the topic (inclusive)
+            "ranges": array of [start, end] index pairs (inclusive) — the stretches of the conversation that belong to this topic
             Rules:
-            - Cover every message exactly once. Segments must be contiguous, non-overlapping, in order, from 0 to the last index.
+            - Cover every message exactly once; ranges never overlap.
+            - When the conversation comes back to an earlier subject, add another range to that SAME topic instead of creating a second topic with the same subject.
             - Merge brief digressions into the surrounding topic. Make one topic per distinct subject; a long transcript can have dozens of topics.
-            - If the whole transcript is one topic, return a single object.
+            - If the whole transcript is one topic, return a single object with one range.
             """
         let raw = try await client.complete(systemPrompt: system, userPrompt: transcript, purpose: .fullSort)
         return try Self.parseTopics(from: raw, messages: numbered)
@@ -96,7 +107,39 @@ struct TopicSegmenter: Sendable {
                 t = String(t[..<fenceRange.lowerBound])
             }
         }
-        return t.trimmingCharacters(in: .whitespacesAndNewlines)
+        t = t.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Keep just the first complete JSON object/array: some models add
+        // text before it or a stray tag after it (e.g. "</final>").
+        return firstJSONValue(in: t) ?? t
+    }
+
+    /// The first balanced {...} or [...] in `s`, ignoring brackets inside
+    /// strings. Nil if there isn't one.
+    static func firstJSONValue(in s: String) -> String? {
+        guard let start = s.firstIndex(where: { $0 == "{" || $0 == "[" }) else { return nil }
+        var depth = 0
+        var inString = false
+        var escaped = false
+        var i = start
+        while i < s.endIndex {
+            let c = s[i]
+            if inString {
+                if escaped { escaped = false }
+                else if c == "\\" { escaped = true }
+                else if c == "\"" { inString = false }
+            } else {
+                switch c {
+                case "\"": inString = true
+                case "{", "[": depth += 1
+                case "}", "]":
+                    depth -= 1
+                    if depth == 0 { return String(s[start...i]) }
+                default: break
+                }
+            }
+            i = s.index(after: i)
+        }
+        return nil
     }
 
     /// Parse and validate the model's segment list against the messages.
@@ -110,21 +153,40 @@ struct TopicSegmenter: Sendable {
         } catch {
             throw AnalysisError.badJSON(raw)
         }
-        // Defensive: clamp indices, drop empties, sort by start.
-        let valid = dtos
-            .filter { $0.start >= 0 && $0.end >= $0.start && $0.start < messages.count }
-            .map { dto -> (Int, Int, SegmentDTO) in
-                (dto.start, min(dto.end, messages.count - 1), dto)
+        let count = messages.count
+        // Which topic each message index belongs to (first claim wins).
+        var owner = [Int?](repeating: nil, count: count)
+        var titles: [String] = []
+        var summaries: [String] = []
+        var byTitle: [String: Int] = [:]
+        for dto in dtos {
+            let title = dto.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = title.lowercased()
+            // Same subject returned twice as separate topics: merge them.
+            let topicIndex: Int
+            if let existing = byTitle[key] {
+                topicIndex = existing
+            } else {
+                topicIndex = titles.count
+                titles.append(title)
+                summaries.append(dto.summary.trimmingCharacters(in: .whitespacesAndNewlines))
+                byTitle[key] = topicIndex
             }
-            .sorted { $0.0 < $1.0 }
-        guard !valid.isEmpty else { throw AnalysisError.noUsableSegments }
-        return valid.map { start, end, dto in
-            Topic(
-                id: UUID(),
-                title: dto.title.trimmingCharacters(in: .whitespacesAndNewlines),
-                summary: dto.summary.trimmingCharacters(in: .whitespacesAndNewlines),
-                messageIds: messages[start...end].map(\.id)
-            )
+            for (a, b) in dto.spans where a >= 0 && b >= a && a < count {
+                for i in a...min(b, count - 1) where owner[i] == nil { owner[i] = topicIndex }
+            }
+        }
+        guard owner.contains(where: { $0 != nil }) else { throw AnalysisError.noUsableSegments }
+        // Messages the model skipped join the topic of the message before
+        // them (or after, at the very start).
+        var last: Int? = owner.first(where: { $0 != nil }) ?? nil
+        for i in 0..<count {
+            if let o = owner[i] { last = o } else { owner[i] = last }
+        }
+        var ids = [[Int64]](repeating: [], count: titles.count)
+        for i in 0..<count { if let o = owner[i] { ids[o].append(messages[i].id) } }
+        return titles.indices.compactMap { t in
+            ids[t].isEmpty ? nil : Topic(id: UUID(), title: titles[t], summary: summaries[t], messageIds: ids[t])
         }
     }
 }

@@ -121,6 +121,16 @@ struct AISettingsSection: View {
         if let note = store.current.entry(provider)?.note {
             Text(note).font(.caption).foregroundStyle(.secondary)
         }
+        Toggle("Also sort older history", isOn: Bindable(settings).sortOlderHistory)
+        Text("After the first sort, keeps sorting the rest of a long conversation in the background. Very long histories use more of your plan.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        if provider == .codex {
+            Toggle("Fast mode", isOn: Bindable(settings).codexFast)
+            Text("About 1.5× faster sorting. ChatGPT may count Fast mode as more of your plan's usage.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     private func loadOptions() async {

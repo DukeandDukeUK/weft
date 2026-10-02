@@ -98,7 +98,8 @@ struct TopicFiler: Sendable {
         context: [(ChatMessage, String)],
         topics: [Topic],
         openLoops: [OpenLoop],
-        preferredTopic: Int? = nil
+        preferredTopic: Int? = nil,
+        purpose: CallPurpose = .filing
     ) async throws -> Result {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
@@ -138,7 +139,7 @@ struct TopicFiler: Sendable {
             "resolvedLoops": array of OPEN LOOPS numbers (e.g. 2 for L2) that the NEW messages clearly resolve. [] if none.
             Use an existing topic when the new messages continue its subject; start a new topic only for a genuinely new subject.
             """
-        let raw = try await client.complete(systemPrompt: system, userPrompt: prompt, purpose: .filing)
+        let raw = try await client.complete(systemPrompt: system, userPrompt: prompt, purpose: purpose)
         let cleaned = TopicSegmenter.stripFences(raw)
         guard let data = cleaned.data(using: .utf8),
               let dto = try? JSONDecoder().decode(ResponseDTO.self, from: data) else {

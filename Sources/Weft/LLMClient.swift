@@ -160,6 +160,8 @@ struct LLMClient: Sendable {
     var model: String
     /// Reasoning level where the provider supports one: low, medium, high.
     var effort: String = "medium"
+    /// ChatGPT (Codex) Fast mode: ~1.5× faster; may use more of the plan.
+    var fast: Bool = false
 
     enum ClientError: Error, LocalizedError {
         case notInstalled(Provider)
@@ -203,9 +205,9 @@ struct LLMClient: Sendable {
         let usage: TokenUsage?
         switch provider {
         case .claude, .codex, .gemini, .grok:
-            let p = provider, m = model, e = effort
+            let p = provider, m = model, e = effort, f = fast
             (reply, usage) = try await Task.detached(priority: .userInitiated) {
-                try CLIRunner.run(provider: p, model: m, effort: e, systemPrompt: systemPrompt, input: userPrompt)
+                try CLIRunner.run(provider: p, model: m, effort: e, fast: f, systemPrompt: systemPrompt, input: userPrompt)
             }.value
         case .ollama, .lmstudio:
             guard !model.isEmpty else { throw ClientError.noLocalModel(provider) }
@@ -232,7 +234,7 @@ struct LLMClient: Sendable {
 
 enum CLIRunner {
     /// Returns the reply and, where the tool reports them, its token counts.
-    static func run(provider: Provider, model: String, effort: String, systemPrompt: String, input: String) throws -> (String, TokenUsage?) {
+    static func run(provider: Provider, model: String, effort: String, fast: Bool = false, systemPrompt: String, input: String) throws -> (String, TokenUsage?) {
         guard let name = provider.executableName, let path = CommandLocator.find(name) else {
             throw LLMClient.ClientError.notInstalled(provider)
         }
@@ -279,6 +281,10 @@ enum CLIRunner {
                 "-o", outputURL.path,
             ]
             if !model.isEmpty { args += ["-m", model] }
+            if fast {
+                // Codex's Fast service tier (needs the feature switch too).
+                args += ["-c", "service_tier=\"fast\"", "-c", "features.fast_mode=true"]
+            }
             args.append("-")
         case .gemini:
             stdinText = combined(systemPrompt, input)
@@ -289,6 +295,11 @@ enum CLIRunner {
                 "--prompt-file", inputURL.path,
                 "--system-prompt-override", systemPrompt,
                 "--tools", "",
+                // One answer, no agent loop, and any tool attempt refused —
+                // otherwise Grok sometimes goes "looking through the
+                // workspace" instead of answering.
+                "--max-turns", "1",
+                "--permission-mode", "dontAsk",
                 "--disable-web-search",
                 "--no-memory",
                 "--no-plan",

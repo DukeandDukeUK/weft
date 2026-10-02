@@ -66,7 +66,7 @@ struct SidebarView: View {
                 }
             }
 
-            Section("Threads") {
+            Section {
                 SidebarRow(
                     isSelected: viewModel.sidebarSelection == .all || viewModel.sidebarSelection == nil,
                     action: { viewModel.sidebarSelection = .all }
@@ -104,6 +104,17 @@ struct SidebarView: View {
                             }
                             CountText(count: topic.messageIds.count)
                         }
+                    }
+                }
+            } header: {
+                HStack(spacing: 6) {
+                    Text("Threads")
+                    Spacer()
+                    if let p = viewModel.historyProgress, p.total > 0 {
+                        ProgressView().controlSize(.mini)
+                        Text("Sorting older messages… \(Int(Double(p.done) / Double(p.total) * 100))%")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
