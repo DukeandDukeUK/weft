@@ -6,9 +6,15 @@ import SwiftUI
 struct NotificationOptions: View {
     @Bindable var settings: AppSettings
     @State private var testResult: String?
+    @Environment(\.openURL) private var openURL
+
+    /// Opens System Settings → Notifications → (that app).
+    static func notificationSettingsURL(bundleID: String) -> URL {
+        URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(bundleID)")!
+    }
 
     var body: some View {
-        Toggle("Show a banner when a new message arrives", isOn: $settings.notifyBanners)
+        Toggle("Allow notifications from Weft", isOn: $settings.notifyBanners)
         HStack {
             Picker("Sound", selection: $settings.notifySound) {
                 Text("Default").tag("default")
@@ -36,9 +42,18 @@ struct NotificationOptions: View {
                 Text(testResult).font(.caption).foregroundStyle(.secondary)
             }
         }
-        Text("Messages also shows its own banners. If you'd rather have only Weft's, turn off alerts for Messages in System Settings → Notifications → Messages.")
+        Text("How notifications look (banners, alerts, previews) is set in macOS. Messages also sends its own notifications — if you'd rather have only Weft's, turn off Messages' notifications there.")
             .font(.caption)
             .foregroundStyle(.secondary)
+        HStack {
+            Button("Open Weft's notification settings") {
+                openURL(Self.notificationSettingsURL(bundleID: Bundle.main.bundleIdentifier ?? "com.dukeandduke.weft"))
+            }
+            Button("Open Messages' notification settings") {
+                openURL(Self.notificationSettingsURL(bundleID: "com.apple.MobileSMS"))
+            }
+        }
+        .controlSize(.small)
     }
 }
 
