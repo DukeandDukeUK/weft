@@ -15,7 +15,7 @@ struct TokenUseSection: View {
     }()
 
     var body: some View {
-        Section("Token use") {
+        Section("AI usage") {
             row("Today", since: Calendar.current.startOfDay(for: Date()))
             row("Last 7 days", since: Date().addingTimeInterval(-7 * 86_400))
             row("Last 30 days", since: Date().addingTimeInterval(-30 * 86_400))
@@ -28,7 +28,7 @@ struct TokenUseSection: View {
                     ForEach(log.entries.suffix(25).reversed()) { entry in
                         VStack(alignment: .leading, spacing: 2) {
                             HStack {
-                                Text(entry.purpose.rawValue)
+                                Text(entry.purpose.label)
                                 Spacer()
                                 Text(entry.usage.map { Self.format($0.total) + " tokens" } ?? "count not available")
                                     .monospacedDigit()

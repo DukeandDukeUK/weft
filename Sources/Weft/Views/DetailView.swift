@@ -72,7 +72,10 @@ struct DetailView: View {
             BetterModelBanner(viewModel: viewModel, tier: tier)
         }
         if let notice = viewModel.notice {
-            NoticeBanner(text: notice) { viewModel.dismissNotice() }
+            let action = viewModel.noticeAction?.forText == notice ? viewModel.noticeAction : nil
+            NoticeBanner(text: notice, actionLabel: action?.label, onAction: action.map { a in { a.run() } }) {
+                viewModel.dismissNotice()
+            }
         }
     }
 }
@@ -81,6 +84,8 @@ struct DetailView: View {
 
 struct NoticeBanner: View {
     let text: String
+    var actionLabel: String? = nil
+    var onAction: (() -> Void)? = nil
     let onDismiss: () -> Void
 
     var body: some View {
@@ -91,11 +96,17 @@ struct NoticeBanner: View {
                 .font(.callout)
                 .textSelection(.enabled)
             Spacer()
+            if let actionLabel, let onAction {
+                Button(actionLabel, action: onAction)
+                    .glassButton()
+                    .controlSize(.small)
+            }
             Button { onDismiss() } label: {
                 Image(systemName: "xmark").font(.caption.weight(.semibold))
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
+            .accessibilityLabel("Dismiss")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -123,7 +134,7 @@ struct StaleBanner: View {
                     .controlSize(.small)
             } else {
                 ProgressView().controlSize(.small)
-                Text("Sorting \(count) new message\(count == 1 ? "" : "s") into threads…")
+                Text("Sorting \(count) new message\(count == 1 ? "" : "s") into topics…")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -277,6 +288,7 @@ struct ThreadHeader: View {
             .buttonBorderShape(.circle)
             .keyboardShortcut(.escape, modifiers: [])
             .help("All messages (Esc)")
+            .accessibilityLabel("Back to all messages")
             VStack(alignment: .leading, spacing: 2) {
                 Text(topic.title).font(.headline)
                 if !topic.summary.isEmpty {

@@ -19,6 +19,12 @@ APP=".build-app/Weft.app"
 DIST="dist"
 DMG="$DIST/Weft-$VERSION.dmg"
 
+echo "==> Running tests…"
+if ! swift test >/dev/null 2>&1; then
+    echo "error: tests failed — not building a release. Run 'swift test' to see which." >&2
+    exit 1
+fi
+
 VERSION="$VERSION" ./make-app.sh
 
 SIGNATURE="$(codesign -dvv "$APP" 2>&1)"

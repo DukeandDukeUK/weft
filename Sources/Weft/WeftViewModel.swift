@@ -70,6 +70,37 @@ final class WeftViewModel {
     /// recently active one) but not yet filed by Claude.
     var pendingMessageIDs: Set<Int64> = []
 
+    /// Changes whenever the open conversation changes. Every AI call
+    /// remembers the session it started in and throws its result away if
+    /// the session has moved on — so a slow sort for conversation A can
+    /// never land in conversation B.
+    private(set) var session = UUID()
+
+    /// A new conversation was opened (or the open one removed): anything
+    /// still running for the previous one is discarded when it returns.
+    func startNewSession() { session = UUID() }
+
+    /// Unsent text per conversation, kept across switching, searching and
+    /// failed sends.
+    var drafts: [Int64: String] = [:] {
+        didSet { UserDefaults.standard.set(Dictionary(uniqueKeysWithValues: drafts.map { (String($0.key), $0.value) }), forKey: "weft.drafts") }
+    }
+    var currentDraft: String {
+        get { settings.selectedChatRowID.flatMap { drafts[$0] } ?? "" }
+        set { if let id = settings.selectedChatRowID { drafts[id] = newValue.isEmpty ? nil : newValue } }
+    }
+
+    /// First sort of a conversation waits for your OK (which AI, how much).
+    var firstSortRequest: ChatInfo?
+
+    /// A notice's optional "Retry"/"Sort" button (only for that notice).
+    struct NoticeAction { let forText: String; let label: String; let run: @MainActor () -> Void }
+    var noticeAction: NoticeAction?
+    func showNotice(_ text: String, action label: String? = nil, run: (@MainActor () -> Void)? = nil) {
+        notice = text
+        noticeAction = (label != nil && run != nil) ? NoticeAction(forText: text, label: label!, run: run!) : nil
+    }
+
     private var pollTask: Task<Void, Never>?
     private var watcher: ChatDBWatcher?
     private var isPolling = false
@@ -133,6 +164,9 @@ final class WeftViewModel {
     static let noAIMessage = "No AI is set up to sort messages yet. Open Settings (gear icon) and pick one."
 
     func startup() async {
+        if let saved = UserDefaults.standard.dictionary(forKey: "weft.drafts") as? [String: String] {
+            drafts = Dictionary(uniqueKeysWithValues: saved.compactMap { k, v in Int64(k).map { ($0, v) } })
+        }
         background.onChange = { [weak self] in self?.updateBadge() }
         background.conversationName = { [weak self] id in
             self?.chats.first { $0.id == id }.map { ContactNames.shared.shortDisplay($0.participants) } ?? "Messages"
@@ -195,6 +229,8 @@ final class WeftViewModel {
 
     func selectChat(_ chat: ChatInfo) async {
         stopPolling()
+        startNewSession()
+        firstSortRequest = nil
         settings.selectedChatRowID = chat.id
         if !settings.followedChats.contains(chat.id) { settings.followedChats.append(chat.id) }
         background.markRead(chat.id)
@@ -223,10 +259,16 @@ final class WeftViewModel {
             if let cached = SegmentationCache.load(chatId: chat.id), !cached.topics.isEmpty {
                 topics = cached.topics
                 loops = cached.loops
-                showProvisionally(messages.filter { $0.id > cached.newestRowId })
+                let filed = Set(cached.topics.flatMap(\.messageIds))
+                showProvisionally(messages.filter { $0.id > cached.newestRowId && !filed.contains($0.id) })
                 if !pendingMessageIDs.isEmpty { scheduleAutoSort(after: 0) }
             } else if !messages.isEmpty {
-                scheduleAutoSort(after: 0)
+                // First time for this conversation: ask before uploading it.
+                if settings.consentedChats.contains(chat.id) {
+                    scheduleAutoSort(after: 0)
+                } else {
+                    firstSortRequest = chat
+                }
             }
             scrollToken += 1
             startPolling()
@@ -317,9 +359,10 @@ final class WeftViewModel {
     /// conversation has no saved topics; otherwise new messages are filed
     /// incrementally by `fileNewMessages()`.
     func analyze() async {
-        guard !messages.isEmpty, settings.selectedChatRowID != nil, !isAnalyzing else { return }
+        guard !messages.isEmpty, let myChat = settings.selectedChatRowID, !isAnalyzing else { return }
         isAnalyzing = true
         defer { isAnalyzing = false }
+        let mySession = session
         let snapshot = messages
         guard let client = settings.makeClient() else {
             notice = Self.noAIMessage
@@ -327,9 +370,21 @@ final class WeftViewModel {
         }
         do {
             async let segmented = TopicSegmenter(client: client).segment(messages: snapshot)
-            async let detected = OpenLoopDetector(client: client).detect(messages: snapshot)
-            let (newTopics, newLoops) = try await (segmented, detected)
-            loops = mergeLoops(newLoops)
+            async let detected = Self.capture { try await OpenLoopDetector(client: client).detect(messages: snapshot) }
+            let newTopics = try await segmented
+            let detection = await detected
+            guard mySession == session else { return }   // conversation changed meanwhile
+            switch detection {
+            case .success(let newLoops):
+                let previouslyOpen = loops.filter { $0.status == .open }
+                loops = mergeLoops(newLoops)
+                await reconcile(previouslyOpen: previouslyOpen, stillDetected: newLoops, client: client, session: mySession)
+            case .failure(let error):
+                showNotice("Couldn't check follow-ups: \(error.localizedDescription)", action: "Retry") { [weak self] in
+                    Task { await self?.retryFollowUps() }
+                }
+            }
+            guard mySession == session else { return }
             let covered = Set(snapshot.map(\.id))
             topics = newTopics
             // Anything that arrived during the sort is still pending.
@@ -338,13 +393,87 @@ final class WeftViewModel {
             showProvisionally(messages.filter { pendingMessageIDs.contains($0.id) })
             sortTopicsByActivity()
             topicsStale = false
-            saveCache(filedThrough: snapshot.map(\.id).max() ?? 0)
+            saveCache(chat: myChat, filedThrough: snapshot.map(\.id).max() ?? 0)
         } catch {
+            guard mySession == session else { return }
             topicsStale = true
-            notice = "Sorting failed: \(error.localizedDescription)"
+            showNotice("Sorting failed: \(error.localizedDescription)", action: "Retry") { [weak self] in
+                Task { await self?.analyze() }
+            }
         }
         if !pendingMessageIDs.isEmpty { scheduleAutoSort(after: 3) }
         startHistoryBackfill()
+    }
+
+    /// Run an async throwing job and keep its error instead of throwing.
+    private static func capture<T: Sendable>(_ job: @Sendable () async throws -> T) async -> Result<T, Error> {
+        do { return .success(try await job()) } catch { return .failure(error) }
+    }
+
+    /// Re-sort: follow-ups that were open before but weren't found again
+    /// may have been settled. Ask once and close those that were. Ones you
+    /// marked yourself (resolved/dismissed) are never touched.
+    private func reconcile(previouslyOpen: [OpenLoop], stillDetected: [OpenLoop], client: LLMClient, session mySession: UUID) async {
+        let found = Set(stillDetected.map { $0.title.lowercased() })
+        let toCheck = previouslyOpen.filter { !found.contains($0.title.lowercased()) }
+        guard !toCheck.isEmpty else { return }
+        let earliest = toCheck.compactMap(\.sourceMessageId).min() ?? 0
+        let later = messages.filter { $0.id > earliest }
+        guard !later.isEmpty,
+              let resolved = try? await OpenLoopDetector(client: client).resolvedLater(loops: toCheck, laterMessages: later),
+              mySession == session else { return }
+        for i in loops.indices where loops[i].status == .open && resolved.contains(loops[i].id) {
+            loops[i].status = .resolved
+        }
+    }
+
+    /// "Retry" after the follow-up check failed.
+    func retryFollowUps() async {
+        guard let myChat = settings.selectedChatRowID, !isAnalyzing, let client = settings.makeClient() else { return }
+        isAnalyzing = true
+        defer { isAnalyzing = false }
+        let mySession = session
+        do {
+            let newLoops = try await OpenLoopDetector(client: client).detect(messages: messages)
+            guard mySession == session else { return }
+            let previouslyOpen = loops.filter { $0.status == .open }
+            loops = mergeLoops(newLoops)
+            await reconcile(previouslyOpen: previouslyOpen, stillDetected: newLoops, client: client, session: mySession)
+            guard mySession == session else { return }
+            notice = nil
+            saveCache(chat: myChat, filedThrough: Self.checkpoint(messages: messages, pending: pendingMessageIDs))
+        } catch {
+            guard mySession == session else { return }
+            showNotice("Couldn't check follow-ups: \(error.localizedDescription)", action: "Retry") { [weak self] in
+                Task { await self?.retryFollowUps() }
+            }
+        }
+    }
+
+    /// First-sort consent given: remember it and start.
+    func approveFirstSort() {
+        guard let chat = firstSortRequest else { return }
+        settings.consentedChats.insert(chat.id)
+        firstSortRequest = nil
+        notice = nil
+        scheduleAutoSort(after: 0)
+    }
+
+    /// "Not now" on the first-sort question.
+    func postponeFirstSort() {
+        guard let chat = firstSortRequest else { return }
+        firstSortRequest = nil
+        showNotice("This conversation isn't sorted yet.", action: "Sort…") { [weak self] in
+            self?.firstSortRequest = chat
+        }
+    }
+
+    /// Newest message that can be marked "sorted": never past a message
+    /// still waiting to be filed, so nothing is lost if Weft quits.
+    static func checkpoint(messages: [ChatMessage], pending: Set<Int64>) -> Int64 {
+        let filed = messages.map(\.id).filter { !pending.contains($0) }.max() ?? 0
+        guard let firstPending = pending.min() else { return filed }
+        return min(filed, firstPending - 1)
     }
 
     // MARK: - Older history
@@ -372,13 +501,14 @@ final class WeftViewModel {
     }
 
     private func runBackfill(chat: Int64?) async {
+        let mySession = session
         historyError = nil
         let total = unsortedHistory().count
         guard total > 0 else {
             await checkHistoryLoops()
             return
         }
-        while !Task.isCancelled, settings.selectedChatRowID == chat, settings.sortOlderHistory {
+        while !Task.isCancelled, mySession == session, settings.sortOlderHistory {
             let remaining = unsortedHistory()
             if remaining.isEmpty {
                 await checkHistoryLoops()
@@ -429,7 +559,7 @@ final class WeftViewModel {
                 return
             }
             isAnalyzing = false
-            guard !Task.isCancelled, settings.selectedChatRowID == chat else { return }
+            guard !Task.isCancelled, mySession == session else { return }
 
             let already = Set(topics.flatMap(\.messageIds))
             var placed = 0
@@ -476,14 +606,15 @@ final class WeftViewModel {
             }
 
             sortTopicsByActivity()
-            let filedThrough = messages.map(\.id).filter { !pendingMessageIDs.contains($0) }.max() ?? 0
-            saveCache(filedThrough: filedThrough)
+            if let chat { saveCache(chat: chat, filedThrough: Self.checkpoint(messages: messages, pending: pendingMessageIDs)) }
         }
     }
 
     /// Loops raised in old history may have been resolved later in the
     /// conversation. One check against the later messages closes those.
     private func checkHistoryLoops() async {
+        let chat = settings.selectedChatRowID
+        let mySession = session
         let pending = loops.filter { $0.status == .open && $0.needsLaterCheck == true }
         guard !pending.isEmpty, var client = settings.makeClient() else { return }
         client.effort = "low"
@@ -494,13 +625,14 @@ final class WeftViewModel {
         defer { isAnalyzing = false }
         do {
             let resolved = try await OpenLoopDetector(client: client).resolvedLater(loops: pending, laterMessages: later)
+            guard mySession == session else { return }
             for i in loops.indices where pending.contains(where: { $0.id == loops[i].id }) {
                 if resolved.contains(loops[i].id) { loops[i].status = .resolved }
                 loops[i].needsLaterCheck = nil
             }
-            let filedThrough = messages.map(\.id).filter { !pendingMessageIDs.contains($0) }.max() ?? 0
-            saveCache(filedThrough: filedThrough)
+            if let chat { saveCache(chat: chat, filedThrough: Self.checkpoint(messages: messages, pending: pendingMessageIDs)) }
         } catch {
+            guard mySession == session else { return }
             historyError = error.localizedDescription
         }
     }
@@ -587,6 +719,7 @@ final class WeftViewModel {
             await selectChat(next)
         } else {
             stopPolling()
+            startNewSession()
             settings.selectedChatRowID = nil
             messages = []; topics = []; loops = []
             showChatPicker = true
@@ -625,6 +758,7 @@ final class WeftViewModel {
     /// Returns the messages that still need Claude to file them (others'
     /// replies are filed with that thread as the likely home).
     private func fileIntoActiveThread(_ fresh: [ChatMessage]) -> [ChatMessage] {
+        guard let chatId = settings.selectedChatRowID else { return fresh }
         guard let thread = activeThread,
               Date().timeIntervalSince(thread.at) < 30 * 60,
               let index = topics.firstIndex(where: { $0.id == thread.topicID }) else {
@@ -650,8 +784,7 @@ final class WeftViewModel {
             }
         }
         sortTopicsByActivity()
-        let filedThrough = messages.map(\.id).filter { !pendingMessageIDs.contains($0) && !unfiled.map(\.id).contains($0) }.max() ?? 0
-        saveCache(filedThrough: filedThrough)
+        saveCache(chat: chatId, filedThrough: Self.checkpoint(messages: messages, pending: pendingMessageIDs.union(unfiled.map(\.id))))
         return unfiled
     }
 
@@ -699,10 +832,14 @@ final class WeftViewModel {
 
     /// Ask Claude where the pending messages belong, given the existing topics.
     private func fileNewMessages() async {
-        let batch = messages.filter { pendingMessageIDs.contains($0.id) }
-        guard !batch.isEmpty else { return }
+        let allPending = messages.filter { pendingMessageIDs.contains($0.id) }
+        guard !allPending.isEmpty, let myChat = settings.selectedChatRowID else { return }
+        // Oldest first, and no more than this AI can take in one call —
+        // the rest wait for the next pass.
+        let batch = Self.batch(allPending, local: settings.provider?.isLocal ?? false)
         isAnalyzing = true
         defer { isAnalyzing = false }
+        let mySession = session
 
         let batchIDs = Set(batch.map(\.id))
         // Topics as they are without the provisional placements.
@@ -742,6 +879,14 @@ final class WeftViewModel {
                 openLoops: openLoops,
                 preferredTopic: preferred
             )
+            guard mySession == session else { return }   // conversation changed meanwhile
+            // Rebuild from the topics as they are now (others may have been
+            // filed while we waited), minus provisional placements.
+            base = topics.map { topic -> Topic in
+                var t = topic
+                t.messageIds.removeAll { pendingMessageIDs.contains($0) }
+                return t
+            }.filter { !$0.messageIds.isEmpty }
             var filed = Set<Int64>()
             for a in result.assignments {
                 if let i = a.topicIndex,
@@ -782,15 +927,32 @@ final class WeftViewModel {
             }
             sortTopicsByActivity()
             topicsStale = false
-            let filedThrough = messages.map(\.id).filter { !pendingMessageIDs.contains($0) }.max() ?? 0
-            saveCache(filedThrough: filedThrough)
-            if !stillPending.subtracting(batchIDs).isEmpty || !filed.isSuperset(of: batchIDs) {
-                scheduleAutoSort(after: 3)
+            saveCache(chat: myChat, filedThrough: Self.checkpoint(messages: messages, pending: pendingMessageIDs))
+            if !pendingMessageIDs.isEmpty {
+                // More waiting (a later batch, or skipped): go again.
+                scheduleAutoSort(after: filed.isSuperset(of: batchIDs) ? 0 : 3)
             }
         } catch {
+            guard mySession == session else { return }
             topicsStale = true
-            notice = "Couldn't sort new messages: \(error.localizedDescription)"
+            showNotice("Couldn't sort new messages: \(error.localizedDescription)", action: "Retry") { [weak self] in
+                self?.scheduleAutoSort(after: 0)
+            }
         }
+    }
+
+    /// The oldest pending messages that fit one AI call.
+    static func batch(_ pending: [ChatMessage], local: Bool) -> [ChatMessage] {
+        let maxCount = local ? 40 : 120
+        let maxChars = local ? 8_000 : 40_000
+        var out: [ChatMessage] = []
+        var chars = 0
+        for m in pending {
+            let size = min(m.text.count, 2_000) + 40
+            if !out.isEmpty && (out.count >= maxCount || chars + size > maxChars) { break }
+            out.append(m); chars += size
+        }
+        return out
     }
 
     /// Most recently active topic first (Mail-style).
@@ -798,8 +960,7 @@ final class WeftViewModel {
         topics.sort { ($0.messageIds.max() ?? 0) > ($1.messageIds.max() ?? 0) }
     }
 
-    private func saveCache(filedThrough: Int64) {
-        guard let chatId = settings.selectedChatRowID else { return }
+    private func saveCache(chat chatId: Int64, filedThrough: Int64) {
         // Don't save provisional placements — they get re-filed on next launch.
         let saved = topics.map { topic -> Topic in
             var t = topic
@@ -809,7 +970,7 @@ final class WeftViewModel {
         try? SegmentationCache.save(
             CachedAnalysis(
                 messageCount: messages.count,
-                newestRowId: filedThrough,
+                newestRowId: min(filedThrough, Self.checkpoint(messages: messages, pending: pendingMessageIDs)),
                 generatedAt: Date(),
                 topics: saved,
                 loops: loops
@@ -913,5 +1074,5 @@ final class WeftViewModel {
         return !calendar.isDate(list[index].date, inSameDayAs: list[index - 1].date)
     }
 
-    func dismissNotice() { notice = nil }
+    func dismissNotice() { notice = nil; noticeAction = nil }
 }

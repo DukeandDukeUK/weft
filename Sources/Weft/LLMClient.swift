@@ -200,7 +200,12 @@ struct LLMClient: Sendable {
     var transcriptCharLimit: Int { provider.transcriptCharLimit }
 
     /// Runs one call and records its token use in the token log.
+    /// Tests set this to stand in for the AI (scripted replies, delays,
+    /// failures). Never set in the app.
+    nonisolated(unsafe) static var testResponder: (@Sendable (_ system: String, _ input: String) async throws -> String)?
+
     func complete(systemPrompt: String, userPrompt: String, purpose: CallPurpose = .other) async throws -> String {
+        if let responder = Self.testResponder { return try await responder(systemPrompt, userPrompt) }
         let reply: String
         let usage: TokenUsage?
         switch provider {

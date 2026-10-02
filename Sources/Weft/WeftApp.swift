@@ -12,7 +12,9 @@ struct WeftApp: App {
     )
 
     var body: some Scene {
-        WindowGroup {
+        // One window: every window would share the selected recipient, so a
+        // second window could send to the wrong person.
+        Window("Weft", id: "main") {
             ContentView()
         }
         .defaultSize(width: 1050, height: 720)
@@ -20,6 +22,14 @@ struct WeftApp: App {
             // Weft menu: About, Check for Updates…, ─, Settings… ⌘,, ─, …
             CommandGroup(after: .appInfo) {
                 CheckForUpdatesView(updater: updaterController.updater)
+            }
+            CommandMenu("Conversations") {
+                ForEach(1...9, id: \.self) { n in
+                    Button("Conversation \(n)") {
+                        NotificationCenter.default.post(name: .weftSelectConversation, object: nil, userInfo: ["index": n - 1])
+                    }
+                    .keyboardShortcut(KeyEquivalent(Character("\(n)")), modifiers: .command)
+                }
             }
             CommandGroup(replacing: .appSettings) {
                 Divider()

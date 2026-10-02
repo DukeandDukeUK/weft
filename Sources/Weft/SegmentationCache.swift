@@ -14,7 +14,14 @@ struct CachedAnalysis: Codable {
 }
 
 enum SegmentationCache {
+    /// Tests point this at a scratch folder so they never touch real data.
+    nonisolated(unsafe) static var directoryOverride: URL?
+
     private static func directory() throws -> URL {
+        if let dir = directoryOverride {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            return dir
+        }
         let base = try FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,

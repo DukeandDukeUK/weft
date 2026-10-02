@@ -6,54 +6,83 @@ import SwiftUI
 /// Sending goes out through the Messages app as you.
 struct ComposeView: View {
     @Bindable var viewModel: WeftViewModel
-    @State private var draft = ""
+
+    private var draft: Binding<String> {
+        Binding(get: { viewModel.currentDraft }, set: { viewModel.currentDraft = $0 })
+    }
 
     private var draftIsBlank: Bool {
-        draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        viewModel.currentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Who a reply goes to — so it's never a surprise.
+    private var recipientLine: String? {
+        guard let chat = viewModel.selectedChat else { return nil }
+        let names = ContactNames.shared.shortDisplay(chat.participants)
+        if viewModel.isGroupChat {
+            let count = chat.participants.split(separator: ",").count
+            return "To the group: \(names) (\(count) people)"
+        }
+        return "To: \(ContactNames.shared.display(chat.participants))"
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 8) {
-            // Grows up to 6 lines as you type; Enter sends, Option-Return
-            // adds a new line (the standard Mac text-field behaviour).
-            TextField(
-                viewModel.selectedTopic.map { "Reply in “\($0.title)”" }
-                    ?? (viewModel.isGroupChat ? "Message the group" : "Message"),
-                text: $draft,
-                axis: .vertical
-            )
-            .textFieldStyle(.plain)
-            .font(.body)
-            .lineLimit(1...6)
-            .onSubmit(send)
-            .padding(.vertical, 8)
-            Button(action: send) {
-                Image(systemName: "arrow.up")
-                    .font(.body.weight(.bold))
-                    .frame(width: 18, height: 18)
+        VStack(alignment: .leading, spacing: 4) {
+            if let recipientLine {
+                Text(recipientLine)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .padding(.leading, 16)
             }
-            .glassButton(prominent: true)
-            .buttonBorderShape(.circle)
-            .keyboardShortcut(.return, modifiers: .command)
-            .disabled(draftIsBlank || viewModel.isSending || !viewModel.canSend)
+            HStack(alignment: .center, spacing: 8) {
+                // Grows up to 6 lines as you type; Enter sends, Option-Return
+                // adds a new line (the standard Mac text-field behaviour).
+                TextField(
+                    viewModel.selectedTopic.map { "Reply in “\($0.title)”" }
+                        ?? (viewModel.isGroupChat ? "Message the group" : "Message"),
+                    text: draft,
+                    axis: .vertical
+                )
+                .textFieldStyle(.plain)
+                .font(.body)
+                .lineLimit(1...6)
+                .onSubmit(send)
+                .padding(.vertical, 8)
+                .accessibilityLabel(recipientLine.map { "Message, \($0)" } ?? "Message")
+                Button(action: send) {
+                    Image(systemName: "arrow.up")
+                        .font(.body.weight(.bold))
+                        .frame(width: 18, height: 18)
+                }
+                .glassButton(prominent: true)
+                .buttonBorderShape(.circle)
+                .keyboardShortcut(.return, modifiers: .command)
+                .disabled(draftIsBlank || viewModel.isSending || !viewModel.canSend)
+                .accessibilityLabel("Send")
+            }
+            .padding(.leading, 16)
+            .padding(.trailing, 6)
+            .padding(.vertical, 4)
+            .glassSurface(RoundedRectangle(cornerRadius: 22, style: .continuous), tint: WeftStyle.accent.opacity(0.08), interactive: true)
         }
-        .padding(.leading, 16)
-        .padding(.trailing, 6)
-        .padding(.vertical, 4)
-        .glassSurface(RoundedRectangle(cornerRadius: 22, style: .continuous), tint: WeftStyle.accent.opacity(0.08), interactive: true)
         .help(viewModel.canSend
             ? "Enter to send, Option-Return for a new line"
             : "This conversation can't be replied to from Weft")
     }
 
     private func send() {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        draft = ""
+        let text = viewModel.currentDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let chat = viewModel.settings.selectedChatRowID else { return }
+        viewModel.currentDraft = ""
         Task {
-            // Failed send: put the text back so nothing is lost.
+            // Failed send: put the text back in that conversation's draft —
+            // ahead of anything typed since — so nothing is lost.
             let sent = await viewModel.send(text)
-            if !sent && draft.isEmpty { draft = text }
+            if !sent {
+                let existing = viewModel.drafts[chat] ?? ""
+                viewModel.drafts[chat] = existing.isEmpty ? text : text + "\n\n" + existing
+            }
         }
     }
 }

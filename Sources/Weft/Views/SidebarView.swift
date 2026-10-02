@@ -34,7 +34,7 @@ struct SidebarView: View {
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
-                                .background(WeftStyle.accent, in: Capsule())
+                                .background(WeftStyle.badge, in: Capsule())
                                 .help("\(count) new message\(count == 1 ? "" : "s")")
                         }
                     }
@@ -108,7 +108,7 @@ struct SidebarView: View {
                 }
             } header: {
                 HStack(spacing: 6) {
-                    Text("Threads")
+                    Text("Topics")
                     Spacer()
                     if let err = viewModel.historyError {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.caption2)
@@ -125,25 +125,21 @@ struct SidebarView: View {
                 }
             }
 
-            Section("Open loops (\(viewModel.openLoopCount))") {
-                if viewModel.loops.isEmpty {
-                    Text("None detected yet.")
+            Section("Follow-ups (\(viewModel.openLoopCount))") {
+                let active = viewModel.loops.filter { $0.status == .open }
+                let done = viewModel.loops.filter { $0.status != .open }
+                if active.isEmpty {
+                    Text(viewModel.loops.isEmpty ? "None found yet." : "Nothing outstanding.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                ForEach(viewModel.loops) { loop in
-                    SidebarRow(
-                        isSelected: viewModel.sidebarSelection == .loop(loop.id),
-                        action: { viewModel.sidebarSelection = .loop(loop.id) }
-                    ) {
-                        Label {
-                            Text(loop.title).lineLimit(2)
-                        } icon: {
-                            Image(systemName: loop.status == .open ? "circle" : "checkmark.circle")
-                        }
-                        .foregroundStyle(loop.status == .open ? .primary : .secondary)
-                        Spacer()
+                ForEach(active) { loop in loopRow(loop) }
+                if !done.isEmpty {
+                    DisclosureGroup("Done (\(done.count))") {
+                        ForEach(done) { loop in loopRow(loop) }
                     }
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
                 }
             }
         }
@@ -151,15 +147,21 @@ struct SidebarView: View {
         // Wide enough that conversation names and thread titles fit.
         .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 420)
         .navigationTitle(viewModel.selectedChat.map { chatTitle($0) } ?? "Weft")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    viewModel.showChatPicker = true
-                } label: {
-                    Image(systemName: "plus.bubble")
-                }
-                .help("Choose a different conversation")
+    }
+
+    private func loopRow(_ loop: OpenLoop) -> some View {
+        SidebarRow(
+            isSelected: viewModel.sidebarSelection == .loop(loop.id),
+            action: { viewModel.sidebarSelection = .loop(loop.id) }
+        ) {
+            Label {
+                Text(loop.title).lineLimit(2)
+            } icon: {
+                Image(systemName: loop.status == .open ? "circle" : (loop.status == .resolved ? "checkmark.circle" : "xmark.circle"))
             }
+            .foregroundStyle(loop.status == .open ? .primary : .secondary)
+            .accessibilityLabel("\(loop.title), \(loop.status == .open ? "open" : (loop.status == .resolved ? "done" : "dismissed"))")
+            Spacer()
         }
     }
 
@@ -188,7 +190,11 @@ private struct ConversationRow<Content: View>: View {
             .fontWeight(isSelected ? .semibold : .regular)
             .onTapGesture(perform: action)
             .listRowInsets(EdgeInsets(top: 1, leading: 4, bottom: 1, trailing: 4))
-            .accessibilityAddTraits(.isButton)
+            // VoiceOver: one element, activates like a button. Keyboard:
+            // Conversations menu, ⌘1–⌘9.
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+            .accessibilityAction { action() }
     }
 }
 

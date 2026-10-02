@@ -1,17 +1,17 @@
 # Weft
 
-**Turn endless Messages conversations into topic threads.**
+**Turn endless Messages conversations into topics.**
 
-If you text an AI assistant (or your boss, or the family group) about everything in one long conversation, it turns into a scroll of mixed subjects: travel plans, a bill, a recipe, back to the travel plans. Weft reads your conversations on your Mac and sorts each one into threads you can open, read and reply in, like separate email threads.
+If you text an AI assistant (or your boss, or the family group) about everything in one long conversation, it turns into a scroll of mixed subjects: travel plans, a bill, a recipe, back to the travel plans. Weft reads your conversations on your Mac and sorts each one into topics you can open, read and reply in, like separate email threads.
 
-![Weft showing a conversation sorted into threads](docs/screenshot-light.png)
+![Weft showing a conversation sorted into topics](docs/screenshot-light.png)
 
-- **Threads, sorted automatically.** New messages are filed into the right thread a few seconds after they arrive, or a new thread is started. When a conversation comes back to an earlier subject, it lands in that same thread.
+- **Topics, sorted automatically.** New messages are filed into the right topic a few seconds after they arrive, or a new topic is started. When a conversation comes back to an earlier subject, it lands in that same topic.
 - **Your whole history.** After the first sort, Weft keeps sorting the older part of a long conversation in the background (you can turn this off in Settings).
 - **Several conversations.** Add as many as you like with **+**, drag them into your own order, and right-click to remove one. All of them stay sorted in the background; a dot shows which have new messages.
 - **Group chats.** Each message shows who sent it, and the sorting knows who said what. Replies go to the whole group — including groups with Android members, sent as regular texts through your iPhone (turn on Text Message Forwarding).
-- **Reply inside a thread.** Your reply is sent through Messages as you. It starts with "Re: <thread> —", so the other side knows which subject you mean (you can turn this off).
-- **Open loops.** Weft keeps a list of requests that haven't been answered yet and promises that haven't been kept, and checks them off when they're done.
+- **Reply inside a topic.** Your reply is sent through Messages as you, and Weft shows who it goes to. It starts with "Re: <topic> —", so other participants know which subject you mean (you can turn this off).
+- **Follow-ups.** Weft keeps a list of requests that haven't been answered yet and promises that haven't been kept, and checks them off when they're done.
 - **Search** across the whole conversation.
 - **Reactions** (❤️ 👍 ✅ …) show on messages just like in Messages, including several people's in a group — click them to see who reacted.
 - **Contact names** next to phone numbers, if you allow Contacts access.
@@ -69,10 +69,11 @@ Based on list prices per million tokens (input / output): Sonnet 5.5 $2 / $10, H
 ## Privacy
 
 - Weft reads your Messages history **only on your Mac** and never changes it.
-- To sort, Weft sends the text of the conversations you added (and who sent each message) to the AI you chose, and nothing else. Each added conversation uses a little of your AI plan as new messages arrive. With Ollama or LM Studio, nothing leaves your Mac.
-- Weft has no account, no server, no analytics and no tracking. Topics and open loops are saved in `~/Library/Application Support/Weft/`.
+- Before a conversation is sent to an AI for the first time, Weft asks — showing which AI, where it goes and how much of the history.
+- To sort, Weft sends the text of the conversations you added (and who sent each message) to the AI you chose, and nothing else. Each added conversation uses a little of your AI plan as new messages arrive. With Ollama or LM Studio, message processing stays on your Mac.
+- Weft has no account, no server, no analytics and no tracking. Topics and follow-ups are saved in `~/Library/Application Support/Weft/`.
 - At launch Weft contacts GitHub to check for updates and to read its model recommendations (`recommendations.json` in this project). GitHub sees your internet address; no messages or personal data are sent.
-- Contacts access is optional. Weft shows names next to numbers, and the names are also part of the text sent to the AI you chose, so it knows who said what. Without Contacts access, phone numbers and email addresses are sent instead. With Ollama or LM Studio, nothing leaves your Mac.
+- Contacts access is optional. Weft shows names next to numbers, and the names are also part of the text sent to the AI you chose, so it knows who said what. Without Contacts access, phone numbers and email addresses are sent instead. With Ollama or LM Studio, message processing stays on your Mac.
 
 ## Limitations
 

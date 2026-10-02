@@ -59,7 +59,7 @@ enum WeftStyle {
     static let teal = Color(light: Color(red: 0.09, green: 0.62, blue: 0.66),
                             dark: Color(red: 0.30, green: 0.80, blue: 0.82))
     /// Your bubbles: the icon's indigo with white text.
-    static let myBubble = Color(light: Color(red: 0.33, green: 0.42, blue: 0.95),
+    static let myBubble = Color(light: Color(red: 0.27, green: 0.35, blue: 0.88),   // 5.6:1 with white text
                                 dark: Color(red: 0.26, green: 0.33, blue: 0.70))
     /// Their bubbles: plain cool gray, so they stand out from the indigo wash.
     static let theirBubble = Color(light: Color(red: 0.82, green: 0.83, blue: 0.87),
@@ -71,6 +71,8 @@ enum WeftStyle {
                                  dark: Color(red: 0.09, green: 0.09, blue: 0.17))
     static let canvasBottom = Color(light: Color(red: 0.97, green: 0.97, blue: 0.99),
                                     dark: Color(red: 0.09, green: 0.09, blue: 0.17))
+    /// Unread-count badges: the icon's indigo in both modes (6.2:1 with white).
+    static let badge = Color(red: 0.27, green: 0.31, blue: 0.86)
     /// Sidebar selection.
     static let selection = LinearGradient(
         colors: [accent.opacity(0.24), teal.opacity(0.20)],

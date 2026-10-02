@@ -244,7 +244,7 @@ struct AISettingsSection: View {
         case .codex: return "Conversation text is sent to OpenAI for sorting and counts against your ChatGPT plan's usage. No API key is used."
         case .gemini: return "Conversation text is sent to Google for sorting, using your Google account's Gemini CLI allowance. No API key is used."
         case .grok: return "Conversation text is sent to xAI for sorting and counts against your Grok plan's usage. No API key is used."
-        case .ollama, .lmstudio: return "Everything stays on this Mac."
+        case .ollama, .lmstudio: return "Message processing stays on this Mac."
         }
     }
 }

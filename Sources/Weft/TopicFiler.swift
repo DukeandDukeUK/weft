@@ -140,6 +140,12 @@ struct TopicFiler: Sendable {
             Use an existing topic when the new messages continue its subject; start a new topic only for a genuinely new subject.
             """
         let raw = try await client.complete(systemPrompt: system, userPrompt: prompt, purpose: purpose)
+        return try Self.parse(raw, newMessages: newMessages, topics: topics, openLoops: openLoops)
+    }
+
+    /// Turn the AI's reply into assignments. Each new message gets exactly
+    /// one thread: if the reply puts a message in two places, the first wins.
+    static func parse(_ raw: String, newMessages: [ChatMessage], topics: [Topic], openLoops: [OpenLoop]) throws -> Result {
         let cleaned = TopicSegmenter.stripFences(raw)
         guard let data = cleaned.data(using: .utf8),
               let dto = try? JSONDecoder().decode(ResponseDTO.self, from: data) else {
@@ -147,16 +153,20 @@ struct TopicFiler: Sendable {
         }
 
         var assignments: [Assignment] = []
+        var claimed = Set<Int>()
         for a in dto.assignments.sorted(by: { $0.start < $1.start }) {
             let start = max(0, a.start)
             let end = min(a.end, newMessages.count - 1)
             guard start <= end else { continue }
+            let indices = (start...end).filter { !claimed.contains($0) }
+            guard !indices.isEmpty else { continue }
+            claimed.formUnion(indices)
             let validTopic = a.topic.flatMap { (0..<topics.count).contains($0) ? $0 : nil }
             let title = (a.newTitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             // A range with neither a valid topic nor a title is unusable.
             guard validTopic != nil || !title.isEmpty else { continue }
             assignments.append(Assignment(
-                messageIds: newMessages[start...end].map(\.id),
+                messageIds: indices.map { newMessages[$0].id },
                 topicIndex: validTopic,
                 newTitle: title,
                 newSummary: (a.newSummary ?? "").trimmingCharacters(in: .whitespacesAndNewlines),

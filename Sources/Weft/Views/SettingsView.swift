@@ -26,9 +26,9 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Threads") {
-                Toggle("Start thread replies with “Re: <thread> —”", isOn: Bindable(viewModel.settings).prefixThreadReplies)
-                Text("The other side sees one long chat. The prefix tells it which subject your reply is about.")
+            Section("Topics") {
+                Toggle("Start topic replies with “Re: <topic> —”", isOn: Bindable(viewModel.settings).prefixThreadReplies)
+                Text("Other participants see one long chat. The prefix tells them which subject your reply is about.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

@@ -51,6 +51,10 @@ final class AppSettings {
     var sortOlderHistory: Bool { didSet { defaults.set(sortOlderHistory, forKey: Keys.sortOlderHistory) } }
     /// ChatGPT (Codex) Fast mode.
     var codexFast: Bool { didSet { defaults.set(codexFast, forKey: Keys.codexFast) } }
+    /// Conversations you've OK'd sending to the AI (first-sort question).
+    var consentedChats: Set<Int64> {
+        didSet { defaults.set(consentedChats.map(String.init), forKey: Keys.consented) }
+    }
     /// Red count on Weft's Dock icon.
     var dockBadge: Bool { didSet { defaults.set(dockBadge, forKey: Keys.dockBadge) } }
     /// The notifications step of first-time setup has been shown.
@@ -80,6 +84,7 @@ final class AppSettings {
         static let notifySound = "weft.notifySound"
         static let dockBadge = "weft.dockBadge"
         static let codexFast = "weft.codexFast"
+        static let consented = "weft.consentedChats"
         static let sortOlderHistory = "weft.sortOlderHistory"
         static let notifOnboarded = "weft.notificationsOnboarded"
         static let lastViewed = "weft.lastViewed"
@@ -106,6 +111,7 @@ final class AppSettings {
         self.notifySound = d.string(forKey: Keys.notifySound) ?? "default"
         self.dockBadge = d.object(forKey: Keys.dockBadge) as? Bool ?? true
         self.codexFast = d.bool(forKey: Keys.codexFast)
+        self.consentedChats = Set((d.stringArray(forKey: Keys.consented) ?? []).compactMap(Int64.init))
         self.sortOlderHistory = d.object(forKey: Keys.sortOlderHistory) as? Bool ?? true
         self.notificationsOnboarded = d.bool(forKey: Keys.notifOnboarded)
         Self.apply(appearance: appearance)

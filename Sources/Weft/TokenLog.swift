@@ -25,9 +25,13 @@ enum CallPurpose: String, Sendable, Codable {
     case fullSort = "Full sort"
     case filing = "Filing new messages"
     case history = "Sorting older history"
-    case openLoops = "Open loops"
+    case openLoops = "Open loops"   // stored name; shown as "Follow-ups"
     case connectionTest = "Connection test"
     case other = "Other"
+
+    /// On-screen name (the stored names above stay as they are so older
+    /// logs still load).
+    var label: String { self == .openLoops ? "Follow-ups" : rawValue }
 }
 
 struct TokenLogEntry: Identifiable, Sendable, Codable, Hashable {
@@ -101,7 +105,11 @@ final class TokenLog {
 
     // MARK: Persistence
 
+    /// Tests point this at a scratch file so they never touch the real log.
+    nonisolated(unsafe) static var fileOverride: URL?
+
     private static func fileURL() throws -> URL {
+        if let fileOverride { return fileOverride }
         let base = try FileManager.default.url(
             for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
         )

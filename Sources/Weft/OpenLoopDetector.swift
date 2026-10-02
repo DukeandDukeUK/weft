@@ -29,9 +29,12 @@ struct OpenLoopDetector: Sendable {
             If there are no open loops, return [].
             """
         let raw = try await client.complete(systemPrompt: system, userPrompt: transcript, purpose: .openLoops)
+        // An unreadable reply is an error, not "nothing outstanding".
         let cleaned = TopicSegmenter.stripFences(raw)
-        guard let data = cleaned.data(using: .utf8) else { return [] }
-        let dtos = (try? JSONDecoder().decode([LoopDTO].self, from: data)) ?? []
+        guard let data = cleaned.data(using: .utf8),
+              let dtos = try? JSONDecoder().decode([LoopDTO].self, from: data) else {
+            throw TopicSegmenter.AnalysisError.badJSON(raw)
+        }
         let now = Date()
         return dtos
             .map { dto in

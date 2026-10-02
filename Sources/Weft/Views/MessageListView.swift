@@ -184,6 +184,10 @@ struct ReactionBadge: View {
         .contentShape(Capsule())
         // Click to see who reacted, like Messages.
         .onTapGesture { showWho = true }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Reactions: " + reactions.map { "\(Self.name(for: $0)) \($0.emoji)" }.joined(separator: ", "))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { showWho = true }
         .popover(isPresented: $showWho, arrowEdge: .top) {
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(Array(reactions.enumerated()), id: \.offset) { _, r in
