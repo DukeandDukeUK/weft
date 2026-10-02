@@ -8,7 +8,7 @@ If you text an AI assistant (or your boss, or the family group) about everything
 
 - **Threads, sorted automatically.** New messages are filed into the right thread a few seconds after they arrive, or a new thread is started.
 - **Several conversations.** Add as many as you like with **+**, drag them into your own order, and right-click to remove one. All of them stay sorted in the background; a dot shows which have new messages.
-- **Group chats.** Each message shows who sent it, and the sorting knows who said what. (Replying to group chats isn't supported yet — reply in Messages.)
+- **Group chats.** Each message shows who sent it, and the sorting knows who said what. Replies go to the whole group — including groups with Android members, sent as regular texts through your iPhone (turn on Text Message Forwarding).
 - **Reply inside a thread.** Your reply is sent through Messages as you. It starts with "Re: <thread> —", so the other side knows which subject you mean (you can turn this off).
 - **Open loops.** Weft keeps a list of requests that haven't been answered yet and promises that haven't been kept, and checks them off when they're done.
 - **Search** across the whole conversation.
@@ -67,7 +67,6 @@ Sorting uses a small amount of your plan's usage each time new messages arrive. 
 ## Limitations
 
 - Mac only. iOS doesn't let apps read your messages, and Android only lets an app do so if it is your default texting app.
-- Replies can be sent only in one-to-one conversations; group chats are read and sorted but not replied to yet.
 - Photos and attachments show as "[attachment]".
 
 ## Building from source
