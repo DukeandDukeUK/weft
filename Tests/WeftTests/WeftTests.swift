@@ -797,4 +797,20 @@ final class WeftTests: XCTestCase {
         XCTAssertTrue(vm.pendingMessageIDs.isEmpty)
         XCTAssertTrue(vm.followUpQueue.isEmpty)
     }
+
+    // MARK: - 0.2.9 (your own casual promises)
+
+    // "I'll let you know when it's ready" becomes a follow-up you owe, even
+    // though the other person answered with their own promise.
+    func testYourCasualPromiseBecomesAFollowUp() throws {
+        let raw = #"{"assignments":[{"start":0,"end":1,"topic":0}],"newLoops":[{"title":"Review newest version","detail":"","message":1,"owner":"them"}],"yourPromises":[{"message":0,"promise":"Tell them when it's ready"}],"resolvedLoops":[]}"#
+        let r = try TopicFiler.parse(raw, newMessages: [msg(10, "i'll let you know when it's ready", me: true), msg(11, "Sounds good, I'll review it")],
+                                     topics: [Topic(id: UUID(), title: "A", summary: "", messageIds: [1])], openLoops: [])
+        XCTAssertEqual(r.newLoops.filter { $0.owner == .me }.map(\.sourceMessageId), [10])
+        XCTAssertEqual(r.newLoops.filter { $0.owner == .them }.count, 1)
+        // Not from You, out of range, null, or a repeat: ignored.
+        let noise = #"{"assignments":[],"newLoops":[{"title":"Tell them","detail":"","message":0,"owner":"me"}],"yourPromises":[{"message":0,"promise":"Tell them"},{"message":1,"promise":"x"},{"message":7,"promise":"y"},{"message":0,"promise":null}],"resolvedLoops":[]}"#
+        let n = try TopicFiler.parse(noise, newMessages: [msg(10, "i'll tell them", me: true), msg(11, "ok")], topics: [], openLoops: [])
+        XCTAssertEqual(n.newLoops.count, 1)
+    }
 }

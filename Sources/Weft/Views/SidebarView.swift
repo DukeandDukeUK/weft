@@ -6,6 +6,8 @@ struct SidebarView: View {
     @Bindable var viewModel: WeftViewModel
     @Environment(\.undoManager) private var undoManager
     @State private var renaming: Topic?
+    @State private var showDone = false
+    @State private var showSnoozed = false
     @State private var renameText = ""
 
     var body: some View {
@@ -180,18 +182,16 @@ struct SidebarView: View {
                             ForEach(waiting) { loop in loopRow(loop, now: now) }
                         }
                         if !snoozed.isEmpty {
-                            DisclosureGroup("Snoozed (\(snoozed.count))") {
+                            expandRow("Snoozed (\(snoozed.count))", isOpen: $showSnoozed)
+                            if showSnoozed {
                                 ForEach(snoozed) { loop in loopRow(loop, now: now) }
                             }
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
                         }
                         if !done.isEmpty {
-                            DisclosureGroup("Done (\(done.count))") {
+                            expandRow("Done (\(done.count))", isOpen: $showDone)
+                            if showDone {
                                 ForEach(done) { loop in loopRow(loop, now: now) }
                             }
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -213,6 +213,30 @@ struct SidebarView: View {
         // Wide enough that conversation names and thread titles fit.
         .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 420)
         .navigationTitle(viewModel.selectedChat.map { chatTitle($0) } ?? "Weft")
+    }
+
+    /// "Done (3)" / "Snoozed (1)": click anywhere on the row to show or
+    /// hide the list.
+    private func expandRow(_ title: String, isOpen: Binding<Bool>) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) { isOpen.wrappedValue.toggle() }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .rotationEffect(.degrees(isOpen.wrappedValue ? 90 : 0))
+                Text(title)
+                Spacer()
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .padding(.leading, 6)
+            .padding(.vertical, 3)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityValue(isOpen.wrappedValue ? "expanded" : "collapsed")
     }
 
     private func groupLabel(_ text: String) -> some View {

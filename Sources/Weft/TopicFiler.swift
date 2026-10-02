@@ -82,7 +82,17 @@ struct TopicFiler: Sendable {
     private struct ResponseDTO: Decodable {
         let assignments: [AssignmentDTO]
         let newLoops: [LoopDTO]?
+        let yourPromises: [PromiseDTO]?
         let resolvedLoops: [LoopRef]?
+    }
+
+    /// One per new message from You: what it promised, or null. Asking about
+    /// each of your messages separately is what makes the AI notice casual
+    /// promises ("I'll let you know…") instead of only the other side's.
+    private struct PromiseDTO: Decodable {
+        let message: Int?
+        let promise: String?
+        let due: String?
     }
 
     let client: LLMClient
@@ -140,6 +150,10 @@ struct TopicFiler: Sendable {
                ("owner": "them"); requests from the others to You or promises You made, not yet done ("owner": "me").
                "message" is the index of the NEW message it comes from. "due": "YYYY-MM-DD" only if a date or deadline is
                stated (resolve words like "Friday" from the message dates), otherwise omit. [] if none.
+            "yourPromises": one entry for EACH NEW message from You, in order: {"message": i, "promise": "short title"} if that
+               message promises or commits You to something not yet done, even casually ("I'll let you know", "I'll send it"),
+               otherwise {"message": i, "promise": null}. Add "due" as above if a date is stated. These are separate from
+               "newLoops" (don't repeat them there).
             "resolvedLoops": array of OPEN LOOPS numbers (e.g. 2 for L2) that the NEW messages clearly resolve. [] if none.
             Use an existing topic when the new messages continue its subject; start a new topic only for a genuinely new subject.
             """
@@ -180,7 +194,7 @@ struct TopicFiler: Sendable {
             ))
         }
         let now = Date()
-        let loops = (dto.newLoops ?? []).map {
+        var loops = (dto.newLoops ?? []).map {
             OpenLoop(
                 id: UUID(),
                 title: $0.title.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -192,6 +206,19 @@ struct TopicFiler: Sendable {
                 dueDate: DueDateParser.parse($0.due)
             )
         }.filter { !$0.title.isEmpty }
+        var mine: [OpenLoop] = []
+        for p in dto.yourPromises ?? [] {
+            guard let i = p.message, newMessages.indices.contains(i), newMessages[i].isFromMe,
+                  let title = p.promise?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else { continue }
+            let id = newMessages[i].id
+            // Already listed (in newLoops or just above)? Once is enough.
+            guard !(loops + mine).contains(where: { $0.sourceMessageId == id && $0.owner == .me }) else { continue }
+            var text = newMessages[i].text.replacingOccurrences(of: "\n", with: " ")
+            if text.count > 200 { text = String(text.prefix(200)) + "…" }
+            mine.append(OpenLoop(id: UUID(), title: title, detail: "You said: \u{201C}\(text)\u{201D}", status: .open,
+                                 createdDate: now, sourceMessageId: id, owner: .me, dueDate: DueDateParser.parse(p.due)))
+        }
+        loops += mine
         var resolved: [UUID] = []
         for ref in dto.resolvedLoops ?? [] {
             if let n = ref.number, openLoops.indices.contains(n) {

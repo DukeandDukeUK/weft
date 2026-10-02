@@ -24,7 +24,7 @@ struct OpenLoopDetector: Sendable {
             (a) requests or questions from You with no confirmed resolution later in the transcript ("owner": "them");
             (b) promises, commitments, or "I'll follow up / I'll handle it" statements from the others with no confirmed completion ("owner": "them");
             (c) requests from the others to You that You haven't done yet ("owner": "me");
-            (d) promises You made that aren't confirmed done ("owner": "me").
+            (d) promises You made that aren't confirmed done, including casual ones ("I'll let you know", "I'll send it") ("owner": "me").
             Ignore anything clearly finished. When unsure whether something resolved, include it.
             Return ONLY a JSON array — no markdown fences, no commentary — of objects with keys:
             "title": short title, 6 words max
