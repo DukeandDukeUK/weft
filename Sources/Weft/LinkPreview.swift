@@ -36,7 +36,9 @@ enum LinkPreviewParser {
         defer { unarchiver.finishDecoding() }
         guard let root = unarchiver.decodeObject(of: RichLinkStub.self, forKey: NSKeyedArchiveRootObjectKey),
               let meta = root.metadata,
-              let url = meta.url ?? meta.originalURL else { return nil }
+              // The address that was actually sent. "URL" is where the site
+              // said it lives after loading, which can be a different page.
+              let url = meta.originalURL ?? meta.url else { return nil }
         return Parsed(url: url,
                       title: meta.title ?? "",
                       site: meta.site ?? url.host() ?? "",

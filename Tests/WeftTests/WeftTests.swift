@@ -829,6 +829,7 @@ final class WeftTests: XCTestCase {
 
     // Messages' saved link preview is read without creating anything else
     // from the archive; a preview with an unexpected type is just skipped.
+    // The card opens the address that was sent, not the site's own idea of it.
     func testLinkPreviewIsReadFromMessagesArchive() throws {
         let archiver = NSKeyedArchiver(requiringSecureCoding: false)
         archiver.setClassName("RichLink", for: FakeRichLink.self)
@@ -853,7 +854,8 @@ final class WeftTests: XCTestCase {
     override init() {}
     required init?(coder: NSCoder) {}
     func encode(with coder: NSCoder) {
-        coder.encode(NSURL(string: "https://example.com/a"), forKey: "URL")
+        coder.encode(NSURL(string: "https://example.com/"), forKey: "URL")        // where the site said it lives
+        coder.encode(NSURL(string: "https://example.com/a"), forKey: "originalURL") // what was sent
         coder.encode("A page" as NSString, forKey: "title")
         coder.encode("Example" as NSString, forKey: "siteName")
         coder.encode(FakeImage(), forKey: "image")
