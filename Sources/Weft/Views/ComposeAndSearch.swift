@@ -13,35 +13,35 @@ struct ComposeView: View {
     }
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextEditor(text: $draft)
-                .overlay(alignment: .topLeading) {
-                    if draft.isEmpty {
-                        Text(viewModel.selectedTopic.map { "Reply in “\($0.title)”" } ?? "Message")
-                            .foregroundStyle(.tertiary)
-                            .padding(.leading, 11)
-                            .padding(.top, 6)
-                            .allowsHitTesting(false)
-                    }
-                }
-                .font(.body)
-                .frame(minHeight: 36, maxHeight: 110)
-                .fixedSize(horizontal: false, vertical: true)
-                .scrollContentBackground(.hidden)
-                .padding(6)
-                .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
-                .onKeyPress(keys: [.return]) { press in
-                    if press.modifiers.contains(.shift) { return .ignored }
-                    send()
-                    return .handled
-                }
-            Button("Send") { send() }
-                .keyboardShortcut(.return, modifiers: .command)
-                .disabled(draftIsBlank || viewModel.isSending || !viewModel.canSend)
+        HStack(alignment: .center, spacing: 8) {
+            // Grows up to 6 lines as you type; Enter sends, Option-Return
+            // adds a new line (the standard Mac text-field behaviour).
+            TextField(
+                viewModel.selectedTopic.map { "Reply in “\($0.title)”" } ?? "Message",
+                text: $draft,
+                axis: .vertical
+            )
+            .textFieldStyle(.plain)
+            .font(.body)
+            .lineLimit(1...6)
+            .onSubmit(send)
+            .padding(.vertical, 8)
+            Button(action: send) {
+                Image(systemName: "arrow.up")
+                    .font(.body.weight(.bold))
+                    .frame(width: 18, height: 18)
+            }
+            .glassButton(prominent: true)
+            .buttonBorderShape(.circle)
+            .keyboardShortcut(.return, modifiers: .command)
+            .disabled(draftIsBlank || viewModel.isSending || !viewModel.canSend)
         }
-        .padding()
+        .padding(.leading, 16)
+        .padding(.trailing, 6)
+        .padding(.vertical, 4)
+        .glassSurface(RoundedRectangle(cornerRadius: 22, style: .continuous), tint: WeftStyle.accent.opacity(0.08), interactive: true)
         .help(viewModel.canSend
-            ? "Enter to send, Shift+Enter for a new line (⌘+Enter also sends)"
+            ? "Enter to send, Option-Return for a new line"
             : "Sending needs a 1:1 conversation with a single participant")
     }
 
@@ -118,6 +118,7 @@ struct LoopDetailView: View {
                 } label: {
                     Label("Back to chat", systemImage: "chevron.left")
                 }
+                .glassButton()
                 .keyboardShortcut(.escape, modifiers: [])
                 Text(loop.title)
                     .font(.title2)
@@ -138,10 +139,12 @@ struct LoopDetailView: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 340)
-                Spacer()
             }
             .padding(24)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: 600, alignment: .leading)
+            .glassSurface(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .padding(24)
+            .frame(maxWidth: .infinity)
         }
     }
 

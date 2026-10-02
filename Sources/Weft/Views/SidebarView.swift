@@ -34,9 +34,17 @@ struct SidebarView: View {
                             }
                         } icon: {
                             Image(systemName: "bubble.left.and.bubble.right")
+                                .foregroundStyle(WeftStyle.accent)
                         }
-                        Spacer()
-                        CountText(count: topic.messageIds.count)
+                        Spacer(minLength: 4)
+                        VStack(alignment: .trailing, spacing: 3) {
+                            if let date = viewModel.lastActivity(of: topic) {
+                                Text(RelativeTime.short(date))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            CountText(count: topic.messageIds.count)
+                        }
                     }
                 }
             }
@@ -91,14 +99,15 @@ private struct SidebarRow<Content: View>: View {
     var body: some View {
         Button(action: action) {
             HStack(alignment: .firstTextBaseline) { content() }
-                .padding(.vertical, 4)
-                .padding(.horizontal, 6)
+                .padding(.vertical, 7)
+                .padding(.horizontal, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(isSelected ? Color.accentColor.opacity(0.22) : Color.clear)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(isSelected ? AnyShapeStyle(WeftStyle.selection) : AnyShapeStyle(Color.clear))
                 )
+                .fontWeight(isSelected ? .semibold : .regular)
         }
         .buttonStyle(.plain)
         .listRowInsets(EdgeInsets(top: 1, leading: 4, bottom: 1, trailing: 4))

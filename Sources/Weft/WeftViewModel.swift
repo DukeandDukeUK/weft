@@ -11,7 +11,15 @@ final class WeftViewModel {
 
     // Data
     var chats: [ChatInfo] = []
-    var messages: [ChatMessage] = []
+    var messages: [ChatMessage] = [] {
+        didSet { dateByID = Dictionary(messages.map { ($0.id, $0.date) }, uniquingKeysWith: { a, _ in a }) }
+    }
+    @ObservationIgnored private var dateByID: [Int64: Date] = [:]
+
+    /// When a thread last had a message (for "2m" / "Yesterday" in the sidebar).
+    func lastActivity(of topic: Topic) -> Date? {
+        topic.messageIds.max().flatMap { dateByID[$0] }
+    }
     var topics: [Topic] = []
     var loops: [OpenLoop] = []
 

@@ -33,6 +33,18 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Appearance") {
+                Picker("Appearance", selection: Bindable(viewModel.settings).appearance) {
+                    Text("Automatic").tag("system")
+                    Text("Light").tag("light")
+                    Text("Dark").tag("dark")
+                }
+                .pickerStyle(.segmented)
+                Text("Automatic follows your Mac's setting in System Settings → Appearance.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             AISettingsSection(viewModel: viewModel)
 
             Section("Permissions") {

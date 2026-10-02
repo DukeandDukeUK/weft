@@ -17,8 +17,17 @@ struct WeftApp: App {
         }
         .defaultSize(width: 1050, height: 720)
         .commands {
+            // Weft menu: About, Check for Updates…, ─, Settings… ⌘,, ─, …
             CommandGroup(after: .appInfo) {
                 CheckForUpdatesView(updater: updaterController.updater)
+            }
+            CommandGroup(replacing: .appSettings) {
+                Divider()
+                Button("Settings…") {
+                    NotificationCenter.default.post(name: .weftOpenSettings, object: nil)
+                }
+                .keyboardShortcut(",", modifiers: .command)
+                Divider()
             }
         }
     }

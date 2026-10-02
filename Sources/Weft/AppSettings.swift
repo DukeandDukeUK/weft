@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 // MARK: - AppSettings
 
@@ -26,6 +27,13 @@ final class AppSettings {
     /// Start replies sent from inside a thread with "Re: <thread title> — "
     /// so the other side knows which subject you mean.
     var prefixThreadReplies: Bool { didSet { defaults.set(prefixThreadReplies, forKey: Keys.prefix) } }
+    /// "system" (follow macOS), "light" or "dark".
+    var appearance: String {
+        didSet {
+            defaults.set(appearance, forKey: Keys.appearance)
+            Self.apply(appearance: appearance)
+        }
+    }
     /// The other participant's handle id (phone/email) — used for sending.
     var selectedHandleId: String { didSet { defaults.set(selectedHandleId, forKey: Keys.handleId) } }
 
@@ -37,6 +45,7 @@ final class AppSettings {
         static let chatRowID = "weft.chatRowID"
         static let handleId = "weft.handleId"
         static let prefix = "weft.prefixThreadReplies"
+        static let appearance = "weft.appearance"
     }
 
     private init() {
@@ -50,6 +59,18 @@ final class AppSettings {
         }
         self.selectedHandleId = d.string(forKey: Keys.handleId) ?? ""
         self.prefixThreadReplies = d.object(forKey: Keys.prefix) as? Bool ?? true
+        self.appearance = d.string(forKey: Keys.appearance) ?? "system"
+        Self.apply(appearance: appearance)
+    }
+
+    /// Nil appearance = follow macOS (including its automatic day/night switch).
+    static func apply(appearance: String) {
+        let value: NSAppearance? = switch appearance {
+        case "light": NSAppearance(named: .aqua)
+        case "dark": NSAppearance(named: .darkAqua)
+        default: nil
+        }
+        DispatchQueue.main.async { NSApplication.shared.appearance = value }
     }
 
     func model(for provider: Provider) -> String {

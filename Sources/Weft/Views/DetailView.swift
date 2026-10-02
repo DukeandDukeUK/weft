@@ -6,43 +6,74 @@ import SwiftUI
 struct DetailView: View {
     @Bindable var viewModel: WeftViewModel
 
-    var body: some View {
-        VStack(spacing: 0) {
-            if let tier = viewModel.betterLocalModel {
-                BetterModelBanner(viewModel: viewModel, tier: tier)
-            }
-            if let notice = viewModel.notice {
-                NoticeBanner(text: notice) { viewModel.dismissNotice() }
-            }
+    private var isSearching: Bool {
+        !viewModel.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
+    var body: some View {
+        Group {
             if viewModel.needsFullDiskAccess {
                 FullDiskAccessView(viewModel: viewModel)
             } else if viewModel.dbMissing {
                 MissingDBView(viewModel: viewModel)
-            } else if !viewModel.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            } else if isSearching {
                 SearchResultsView(viewModel: viewModel)
             } else if case .loop(let id)? = viewModel.sidebarSelection,
                       let loop = viewModel.loops.first(where: { $0.id == id }) {
                 LoopDetailView(viewModel: viewModel, loop: loop)
             } else {
-                if let topic = viewModel.selectedTopic {
-                    ThreadHeader(topic: topic) { viewModel.sidebarSelection = .all }
-                    Divider()
-                }
-                MessageListView(viewModel: viewModel)
-                Divider()
-                ComposeView(viewModel: viewModel)
-            }
-
-            if !viewModel.pendingMessageIDs.isEmpty,
-               viewModel.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-               !viewModel.dbMissing {
-                StaleBanner(count: viewModel.pendingMessageIDs.count, failed: viewModel.topicsStale) {
-                    Task { await viewModel.analyze() }
+                // Stacked, not layered: header row (with its divider right
+                // under it), then the conversation, then the message box.
+                // Layering the header over the scroll view made macOS draw
+                // its own toolbar separator partway down the conversation.
+                VStack(spacing: 0) {
+                    if viewModel.selectedTopic != nil || viewModel.notice != nil || viewModel.betterLocalModel != nil {
+                        VStack(spacing: 8) {
+                            if let topic = viewModel.selectedTopic {
+                                ThreadHeader(topic: topic) { viewModel.sidebarSelection = .all }
+                            }
+                            notices
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: WeftStyle.readableWidth)
+                        .frame(maxWidth: .infinity)
+                        // Same material as the threads sidebar, so the two match.
+                        .background(SidebarMaterial().ignoresSafeArea(edges: .horizontal))
+                        Divider()
+                    }
+                    MessageListView(viewModel: viewModel)
+                    VStack(spacing: 8) {
+                        if !viewModel.pendingMessageIDs.isEmpty {
+                            StaleBanner(count: viewModel.pendingMessageIDs.count, failed: viewModel.topicsStale) {
+                                Task { await viewModel.analyze() }
+                            }
+                        }
+                        ComposeView(viewModel: viewModel)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 6)
+                    .padding(.bottom, 14)
+                    .frame(maxWidth: WeftStyle.readableWidth)
+                    .frame(maxWidth: .infinity)
                 }
             }
         }
-        .frame(minWidth: 420)
+        .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            LinearGradient(colors: [WeftStyle.canvasTop, WeftStyle.canvasBottom], startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
+        )
+    }
+
+    @ViewBuilder
+    private var notices: some View {
+        if let tier = viewModel.betterLocalModel {
+            BetterModelBanner(viewModel: viewModel, tier: tier)
+        }
+        if let notice = viewModel.notice {
+            NoticeBanner(text: notice) { viewModel.dismissNotice() }
+        }
     }
 }
 
@@ -61,12 +92,14 @@ struct NoticeBanner: View {
                 .textSelection(.enabled)
             Spacer()
             Button { onDismiss() } label: {
-                Image(systemName: "xmark")
+                Image(systemName: "xmark").font(.caption.weight(.semibold))
             }
             .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
         }
-        .padding(10)
-        .background(Color.orange.opacity(0.12))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .glassSurface(RoundedRectangle(cornerRadius: 16, style: .continuous), tint: .orange.opacity(0.18))
     }
 }
 
@@ -80,22 +113,24 @@ struct StaleBanner: View {
     let onReanalyze: () -> Void
 
     var body: some View {
-        HStack {
+        HStack(spacing: 8) {
             if failed {
-                Image(systemName: "exclamationmark.triangle")
-                Text("Couldn't sort \(count) new message\(count == 1 ? "" : "s") — will retry with the next message.")
+                Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+                Text("Couldn't sort \(count) new message\(count == 1 ? "" : "s") — will retry with the next one.")
                     .font(.callout)
-                Spacer()
                 Button("Sort now", action: onReanalyze)
+                    .glassButton()
+                    .controlSize(.small)
             } else {
-                ProgressView().scaleEffect(0.6)
-                Text("Sorting \(count) new message\(count == 1 ? "" : "s") into topics…")
+                ProgressView().controlSize(.small)
+                Text("Sorting \(count) new message\(count == 1 ? "" : "s") into threads…")
                     .font(.callout)
-                Spacer()
+                    .foregroundStyle(.secondary)
             }
         }
-        .padding(10)
-        .background(Color.blue.opacity(0.08))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .glassSurface(Capsule(), tint: WeftStyle.teal.opacity(0.16))
     }
 }
 
@@ -123,11 +158,14 @@ struct BetterModelBanner: View {
                 }
                 Spacer()
                 Button("Download") { Task { await viewModel.installBetterLocalModel() } }
+                    .glassButton(prominent: true)
                 Button("Not now") { viewModel.dismissBetterLocalModel() }
+                    .glassButton()
             }
         }
-        .padding(10)
-        .background(Color.accentColor.opacity(0.08))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .glassSurface(RoundedRectangle(cornerRadius: 16, style: .continuous), tint: WeftStyle.accent.opacity(0.12))
     }
 }
 
@@ -231,21 +269,28 @@ struct ThreadHeader: View {
     let onAll: () -> Void
 
     var body: some View {
-        HStack(alignment: .top) {
+        HStack(alignment: .center, spacing: 12) {
+            Button(action: onAll) {
+                Image(systemName: "chevron.left").font(.body.weight(.semibold))
+            }
+            .glassButton()
+            .buttonBorderShape(.circle)
+            .keyboardShortcut(.escape, modifiers: [])
+            .help("All messages (Esc)")
             VStack(alignment: .leading, spacing: 2) {
                 Text(topic.title).font(.headline)
                 if !topic.summary.isEmpty {
                     Text(topic.summary)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .lineLimit(1)
+                        .help(topic.summary)
                 }
             }
-            Spacer()
-            Button("All messages", action: onAll)
-                .keyboardShortcut(.escape, modifiers: [])
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .glassSurface(RoundedRectangle(cornerRadius: 22, style: .continuous), tint: WeftStyle.accent.opacity(0.12))
     }
 }

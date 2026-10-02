@@ -29,7 +29,10 @@ struct MessageListView: View {
                             .id(message.id)
                     }
                 }
-                .padding()
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .frame(maxWidth: WeftStyle.readableWidth)
+                .frame(maxWidth: .infinity)
                 // Fixed marker below the last message: scrolling to it always
                 // lands at the true bottom, even before new rows are measured.
                 Color.clear.frame(height: 1).id(Self.bottomID)
@@ -38,6 +41,7 @@ struct MessageListView: View {
             // Open every thread at the newest message, and keep the view
             // pinned there as content grows.
             .defaultScrollAnchor(.bottom)
+            .hideSystemTopSeparator()
             // Track whether YOU scrolled away from the bottom. A new message
             // grows the content before we can scroll to it, which briefly looks
             // like "not at bottom" — so ignore changes caused by content growth.
@@ -118,12 +122,16 @@ struct MessageRow: View {
             VStack(alignment: message.isFromMe ? .trailing : .leading, spacing: 3) {
                 Text(message.text)
                     .textSelection(.enabled)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(message.isFromMe ? Color.accentColor : Color.secondary.opacity(0.15))
-                    .foregroundStyle(message.isFromMe ? .white : .primary)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                    // Reactions sit on the bubble's top corner, like Messages.
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(message.isFromMe ? WeftStyle.myBubble : WeftStyle.theirBubble,
+                                in: RoundedRectangle(cornerRadius: WeftStyle.bubbleRadius, style: .continuous))
+                    // Solid black/white in their bubbles: macOS's normal text
+                    // color is slightly see-through and loses contrast on gray.
+                    .foregroundStyle(message.isFromMe ? Color.white : WeftStyle.theirText)
+                    // Reactions sit on the bubble's own top corner, like
+                    // Messages (attached before the width limit, so they
+                    // follow the bubble, not the column).
                     .overlay(alignment: message.isFromMe ? .topLeading : .topTrailing) {
                         if !message.reactions.isEmpty {
                             ReactionBadge(reactions: message.reactions)
@@ -131,6 +139,7 @@ struct MessageRow: View {
                         }
                     }
                     .padding(.top, message.reactions.isEmpty ? 0 : 10)
+                    .frame(maxWidth: 560, alignment: message.isFromMe ? .trailing : .leading)
                 Text(Self.timeFormatter.string(from: message.date))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -151,10 +160,9 @@ struct ReactionBadge: View {
                 Text(reaction.emoji).font(.system(size: 13))
             }
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, 7)
         .padding(.vertical, 3)
-        .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.25)))
+        .glassSurface(Capsule())
         .help(reactions.map { "\($0.isFromMe ? "You" : "Them"): \($0.emoji)" }.joined(separator: "\n"))
     }
 }
@@ -172,13 +180,10 @@ struct DayDivider: View {
     }()
 
     var body: some View {
-        HStack(spacing: 8) {
-            Rectangle().fill(Color.secondary.opacity(0.25)).frame(height: 1)
-            Text(Self.dayFormatter.string(from: date))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Rectangle().fill(Color.secondary.opacity(0.25)).frame(height: 1)
-        }
-        .padding(.vertical, 4)
+        Text(Self.dayFormatter.string(from: date))
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
     }
 }
