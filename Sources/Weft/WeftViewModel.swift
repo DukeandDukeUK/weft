@@ -246,6 +246,9 @@ final class WeftViewModel {
     func selectChat(_ chat: ChatInfo) async {
         stopPolling()
         startNewSession()
+        // Opened something else before this finished loading? Then this
+        // load is dropped — it must never show (or save) under the other one.
+        let mySession = session
         firstSortRequest = nil
         followUpQueue = []
         settings.selectedChatRowID = chat.id
@@ -262,18 +265,26 @@ final class WeftViewModel {
         loops = []
         topicsStale = false
         isLoading = true
-        defer { isLoading = false }
+        defer { if mySession == session { isLoading = false } }
         do {
-            messages = try await Self.withAttachments(reader.fetchMessages(chatRowID: chat.id).map(Self.labeled), chat: chat.id, reader: reader)
+            let loaded = try await Self.withAttachments(reader.fetchMessages(chatRowID: chat.id).map(Self.labeled), chat: chat.id, reader: reader)
+            guard mySession == session else { return }
+            messages = loaded
             lastSeenRowID = messages.last?.id ?? 0
             settings.markViewed(chat: chat.id, through: messages.map(\.id).max() ?? 0)
             lastReactionRowID = 0
             await applyNewReactions(chatRowID: chat.id)
+            guard mySession == session else { return }
             pendingMessageIDs = []
             provisionalTopic = [:]
             // Restore the saved topics, then file anything that arrived while
             // the app was closed. No saved topics yet -> one full sort.
-            if let cached = SegmentationCache.load(chatId: chat.id), !cached.topics.isEmpty {
+            if var cached = SegmentationCache.load(chatId: chat.id), !cached.topics.isEmpty {
+                // Only this conversation's messages belong in its topics
+                // (repairs files an older version mixed up).
+                if Self.dropForeignMessages(&cached, keeping: Set(messages.map(\.id))) {
+                    try? SegmentationCache.save(cached, chatId: chat.id)
+                }
                 topics = cached.topics
                 loops = cached.loops
                 followUpQueue = Set(cached.followUpQueue ?? []).intersection(messages.map(\.id))
@@ -331,6 +342,7 @@ final class WeftViewModel {
 
     func pollOnce() async {
         guard let chatId = settings.selectedChatRowID, !isPolling else { return }
+        let mySession = session
         isPolling = true
         defer { isPolling = false }
         do {
@@ -341,6 +353,8 @@ final class WeftViewModel {
                 .fetchMessages(chatRowID: chatId, after: lastSeenRowID)
                 .filter { !known.contains($0.id) }
                 .map(Self.labeled), chat: chatId, after: lastSeenRowID, reader: reader)
+            // Switched conversations meanwhile: these belong to the old one.
+            guard mySession == session else { return }
             if !fresh.isEmpty {
                 messages.append(contentsOf: fresh)
                 lastSeenRowID = max(lastSeenRowID, fresh.map(\.id).max() ?? 0)
@@ -899,6 +913,20 @@ final class WeftViewModel {
         }
     }
 
+    /// Remove topic entries (and follow-ups) pointing at messages that aren't
+    /// in this conversation. Returns true if anything was removed.
+    static func dropForeignMessages(_ cached: inout CachedAnalysis, keeping ids: Set<Int64>) -> Bool {
+        let before = cached.topics.reduce(0) { $0 + $1.messageIds.count } + cached.loops.count
+        cached.topics = cached.topics.map { t in
+            var t = t
+            t.messageIds.removeAll { !ids.contains($0) }
+            return t
+        }.filter { !$0.messageIds.isEmpty }
+        cached.loops.removeAll { loop in loop.sourceMessageId.map { !ids.contains($0) } ?? false }
+        cached.followUpQueue = cached.followUpQueue?.filter(ids.contains)
+        return cached.topics.reduce(0) { $0 + $1.messageIds.count } + cached.loops.count != before
+    }
+
     /// Open this conversation in Messages. One-to-one conversations open to
     /// that person; for group chats Messages itself opens (there's no
     /// public way to open a specific group).
@@ -951,8 +979,9 @@ final class WeftViewModel {
     /// Apply reaction rows newer than the last one seen: each person has at
     /// most one reaction of a kind per message; a removal row takes it back.
     private func applyNewReactions(chatRowID: Int64) async {
+        let mySession = session
         guard let events = try? await reader.fetchReactions(chatRowID: chatRowID, after: lastReactionRowID),
-              !events.isEmpty else { return }
+              !events.isEmpty, mySession == session else { return }
         lastReactionRowID = events.map(\.rowID).max() ?? lastReactionRowID
         var indexByGuid: [String: Int] = [:]
         for (i, m) in messages.enumerated() where !m.guid.isEmpty { indexByGuid[m.guid] = i }

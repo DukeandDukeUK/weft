@@ -843,7 +843,57 @@ final class WeftTests: XCTestCase {
         let other = try NSKeyedArchiver.archivedData(withRootObject: NSDate(), requiringSecureCoding: false)
         XCTAssertNil(LinkPreviewParser.parse(other))
     }
+
+    // MARK: - 0.3.2 (conversations mixed up when switching quickly)
+
+    // Opening B while A is still loading: A's slow load must not take over B
+    // (it used to, and A's topics were then saved into B's file).
+    func testSlowLoadDoesNotLandInTheNextConversation() async throws {
+        let a: Int64 = 2_600, b: Int64 = 2_601
+        let path = try fixtureDB([(1, a, "from A", nil, false), (2, a, "more A", nil, true), (3, b, "from B", nil, false)])
+        try SegmentationCache.save(CachedAnalysis(messageCount: 2, newestRowId: 2, generatedAt: Date(),
+            topics: [Topic(id: UUID(), title: "A topic", summary: "", messageIds: [1, 2])], loops: []), chatId: a)
+        try SegmentationCache.save(CachedAnalysis(messageCount: 1, newestRowId: 3, generatedAt: Date(),
+            topics: [Topic(id: UUID(), title: "B topic", summary: "", messageIds: [3])], loops: []), chatId: b)
+        let vm = WeftViewModel()
+        let before = (vm.settings.followedChats, vm.settings.selectedChatRowID)
+        defer { vm.settings.followedChats = before.0; vm.settings.selectedChatRowID = before.1 }
+        vm.background.reader = ChatDBReader(path: path)
+        vm.reader = ChatDBReader(path: path, testDelay: 0.4)          // A loads slowly
+        let first = Task { await vm.selectChat(ChatInfo(id: a, participants: "x", messageCount: 2, lastDate: nil, lastSnippet: nil)) }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        vm.reader = ChatDBReader(path: path)                            // B loads at once
+        await vm.selectChat(ChatInfo(id: b, participants: "y", messageCount: 1, lastDate: nil, lastSnippet: nil))
+        await first.value
+        XCTAssertEqual(vm.settings.selectedChatRowID, b)
+        XCTAssertEqual(vm.messages.map(\.id), [3], "A's messages took over B")
+        XCTAssertEqual(vm.topics.map(\.title), ["B topic"])
+        XCTAssertEqual(SegmentationCache.load(chatId: b)?.topics.map(\.title), ["B topic"], "A's topics were saved into B")
+    }
+
+    // A file that already has another conversation's topics mixed in is
+    // cleaned when the conversation opens.
+    func testMixedUpTopicsAreCleanedOnOpen() async throws {
+        let a: Int64 = 2_700, b: Int64 = 2_701
+        let path = try fixtureDB([(1, a, "from A", nil, false), (2, b, "from B", nil, false), (3, b, "more B", nil, true)])
+        try SegmentationCache.save(CachedAnalysis(messageCount: 2, newestRowId: 3, generatedAt: Date(),
+            topics: [Topic(id: UUID(), title: "B topic", summary: "", messageIds: [2]),
+                     Topic(id: UUID(), title: "A topic", summary: "", messageIds: [1]),
+                     Topic(id: UUID(), title: "Mixed", summary: "", messageIds: [1, 3])],
+            loops: [OpenLoop(id: UUID(), title: "From A", detail: "", status: .open, createdDate: Date(), sourceMessageId: 1)]), chatId: b)
+        let vm = WeftViewModel()
+        let before = (vm.settings.followedChats, vm.settings.selectedChatRowID)
+        defer { vm.settings.followedChats = before.0; vm.settings.selectedChatRowID = before.1 }
+        vm.reader = ChatDBReader(path: path)
+        vm.background.reader = vm.reader
+        await vm.selectChat(ChatInfo(id: b, participants: "y", messageCount: 2, lastDate: nil, lastSnippet: nil))
+        XCTAssertEqual(Set(vm.topics.map(\.title)), ["B topic", "Mixed"])
+        XCTAssertEqual(vm.topics.first { $0.title == "Mixed" }?.messageIds, [3])
+        XCTAssertTrue(vm.loops.isEmpty)
+        XCTAssertEqual(SegmentationCache.load(chatId: b)?.topics.flatMap(\.messageIds).sorted(), [2, 3], "the cleaned version wasn't saved")
+    }
 }
+
 
 @objc(WeftFakeImage) private final class FakeImage: NSObject, NSCoding {
     override init() {}

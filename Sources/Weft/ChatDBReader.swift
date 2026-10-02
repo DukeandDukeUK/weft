@@ -57,7 +57,13 @@ actor ChatDBReader {
 
     /// Tests use a small fixture database; the app always reads Messages'.
     private let pathOverride: String?
-    init(path: String? = nil) { pathOverride = path }
+    init(path: String? = nil, testDelay: TimeInterval = 0) {
+        pathOverride = path
+        self.testDelay = testDelay
+    }
+
+    /// Tests only: make loading a conversation slow.
+    private let testDelay: TimeInterval
 
     /// Decoded rich-text bodies (messages whose text is only in
     /// attributedBody), kept for the session so repeat searches are fast.
@@ -205,6 +211,7 @@ actor ChatDBReader {
             sql += " ORDER BY m.date ASC, m.ROWID ASC"
         }
 
+        if testDelay > 0 { Thread.sleep(forTimeInterval: testDelay) }
         let rows: [ChatMessage] = try query(sql, bind: { stmt in
             var i: Int32 = 1
             sqlite3_bind_int64(stmt, i, chatRowID); i += 1
