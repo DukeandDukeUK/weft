@@ -630,4 +630,69 @@ final class WeftTests: XCTestCase {
         let stale = try await reader.search("six", inChats: [9])
         XCTAssertTrue(stale.isEmpty)
     }
+
+    // MARK: - 0.2.6 fixes (Astra's 0.2.5 review)
+
+    // Switching away before a topic reply's follow-up check runs: the check
+    // still happens when you come back.
+    func testUncheckedReplySurvivesSwitchingConversations() async throws {
+        let chat: Int64 = 2_000, other: Int64 = 2_001
+        let promise = "I'll book the table"
+        let path = try fixtureDB([(1, chat, "Can you book dinner?", nil, false), (2, chat, promise, nil, true),
+                                  (3, other, "unrelated", nil, false)])
+        var sentToAI = ""
+        LLMClient.testResponder = { _, input in
+            sentToAI += input
+            return #"{"assignments":[],"newLoops":[{"title":"Book the table","detail":"","message":0,"owner":"me"}],"resolvedLoops":[]}"#
+        }
+        let vm = WeftViewModel()
+        vm.reader = ChatDBReader(path: path)
+        vm.background.reader = vm.reader
+        let info = ChatInfo(id: chat, participants: "x", messageCount: 2, lastDate: nil, lastSnippet: nil)
+        let otherInfo = ChatInfo(id: other, participants: "y", messageCount: 1, lastDate: nil, lastSnippet: nil)
+        vm.chats = [info, otherInfo]
+        let before = (vm.settings.followedChats, vm.settings.selectedChatRowID)
+        defer { vm.settings.followedChats = before.0; vm.settings.selectedChatRowID = before.1 }
+        vm.settings.selectedChatRowID = chat
+        vm.settings.grantConsent(chat)
+        let a = Topic(id: UUID(), title: "Dinner", summary: "", messageIds: [1])
+        vm.messages = [msg(1)]
+        vm.topics = [a]
+        vm.noteReplySent(inTopic: a.id, text: promise)
+        await vm.pollOnce()                                  // reply filed, check queued
+        XCTAssertEqual(vm.followUpQueue, [2])
+        await vm.selectChat(otherInfo)                       // switch before the check runs
+        await vm.selectChat(info)                            // and come back
+        try await Task.sleep(nanoseconds: 400_000_000)
+        XCTAssertTrue(sentToAI.contains(promise), "the reply's follow-up check was lost")
+        XCTAssertTrue(vm.loops.contains { $0.title == "Book the table" })
+        XCTAssertTrue(vm.followUpQueue.isEmpty)
+    }
+
+    // Many replies waiting only for a follow-up check: every batch is
+    // checked, not just the first.
+    func testAllQueuedRepliesGetChecked() async throws {
+        let settings = AppSettings.shared
+        settings.provider = .ollama
+        settings.setModel("test-model", for: .ollama)
+        defer { settings.provider = .claude }
+        let chat: Int64 = 2_100
+        let long = String(repeating: "word ", count: 400)    // ~2,000 characters each
+        var checked = Set<String>()
+        LLMClient.testResponder = { _, input in
+            for n in 1...8 where input.contains("reply \(n) ") { checked.insert("\(n)") }
+            return #"{"assignments":[],"newLoops":[],"resolvedLoops":[]}"#
+        }
+        let vm = WeftViewModel()
+        vm.chats = [ChatInfo(id: chat, participants: "x", messageCount: 9, lastDate: nil, lastSnippet: nil)]
+        vm.settings.selectedChatRowID = chat
+        vm.settings.grantConsent(chat)
+        vm.messages = [msg(1)] + (2...9).map { msg(Int64($0), "reply \($0 - 1) " + long, me: true) }
+        vm.topics = [Topic(id: UUID(), title: "A", summary: "", messageIds: Array(1...9))]
+        vm.followUpQueue = Set(2...9)
+        vm.retryFiling()
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        XCTAssertEqual(checked.count, 8, "only \(checked.count) of 8 replies were checked")
+        XCTAssertTrue(vm.followUpQueue.isEmpty)
+    }
 }

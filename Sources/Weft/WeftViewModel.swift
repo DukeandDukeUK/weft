@@ -276,9 +276,10 @@ final class WeftViewModel {
             if let cached = SegmentationCache.load(chatId: chat.id), !cached.topics.isEmpty {
                 topics = cached.topics
                 loops = cached.loops
+                followUpQueue = Set(cached.followUpQueue ?? []).intersection(messages.map(\.id))
                 let filed = Set(cached.topics.flatMap(\.messageIds))
                 showProvisionally(messages.filter { $0.id > cached.newestRowId && !filed.contains($0.id) })
-                if !pendingMessageIDs.isEmpty { scheduleAutoSort(after: 0) }
+                if !pendingMessageIDs.isEmpty || !followUpQueue.isEmpty { scheduleAutoSort(after: 0) }
             } else if !messages.isEmpty {
                 // First time: the consent check (at the AI call) asks first.
                 scheduleAutoSort(after: 0)
@@ -1153,9 +1154,10 @@ final class WeftViewModel {
             sortTopicsByActivity()
             topicsStale = false
             saveCache(chat: myChat, filedThrough: Self.checkpoint(messages: messages, pending: pendingMessageIDs))
-            if !pendingMessageIDs.isEmpty {
-                // More waiting (a later batch, or skipped): go again.
-                scheduleAutoSort(after: filed.isSuperset(of: batchIDs) ? 0 : 3)
+            if !pendingMessageIDs.isEmpty || !followUpQueue.isEmpty {
+                // More waiting (a later batch, skipped, or replies still to
+                // check for follow-ups): go again.
+                scheduleAutoSort(after: stillPending.isDisjoint(with: batchIDs) ? 0 : 3)
             }
         } catch {
             guard mySession == session else { return }
@@ -1198,7 +1200,8 @@ final class WeftViewModel {
                 newestRowId: min(filedThrough, Self.checkpoint(messages: messages, pending: pendingMessageIDs)),
                 generatedAt: Date(),
                 topics: saved,
-                loops: loops
+                loops: loops,
+                followUpQueue: followUpQueue.sorted()
             ),
             chatId: chatId
         )

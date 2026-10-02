@@ -11,6 +11,9 @@ struct CachedAnalysis: Codable {
     var generatedAt: Date
     var topics: [Topic]
     var loops: [OpenLoop]
+    /// Your topic replies not yet checked for follow-ups (kept so the check
+    /// still happens after switching conversations or quitting).
+    var followUpQueue: [Int64]? = nil
 }
 
 enum SegmentationCache {
