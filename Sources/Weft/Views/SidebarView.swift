@@ -134,6 +134,9 @@ struct SidebarView: View {
                             }
                         }
                         .disabled(viewModel.topics.count < 2)
+                        Divider()
+                        Button("Remove Topic") { viewModel.removeTopic(topic.id) }
+                            .help("Removes this topic; its messages are sorted again into the right topics")
                     }
                 }
             } header: {

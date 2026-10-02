@@ -282,7 +282,8 @@ final class WeftViewModel {
             if var cached = SegmentationCache.load(chatId: chat.id), !cached.topics.isEmpty {
                 // Only this conversation's messages belong in its topics
                 // (repairs files an older version mixed up).
-                if Self.dropForeignMessages(&cached, keeping: Set(messages.map(\.id))) {
+                let repair = Self.dropForeignMessages(&cached, keeping: Set(messages.map(\.id)))
+                if repair.changed {
                     try? SegmentationCache.save(cached, chatId: chat.id)
                 }
                 topics = cached.topics
@@ -290,6 +291,8 @@ final class WeftViewModel {
                 followUpQueue = Set(cached.followUpQueue ?? []).intersection(messages.map(\.id))
                 let filed = Set(cached.topics.flatMap(\.messageIds))
                 showProvisionally(messages.filter { $0.id > cached.newestRowId && !filed.contains($0.id) })
+                let toRefile = Set(repair.refile)
+                showProvisionally(messages.filter { toRefile.contains($0.id) })
                 if hasWaitingWork { scheduleAutoSort(after: 0) }
             } else if !messages.isEmpty {
                 // First time: the consent check (at the AI call) asks first.
@@ -913,18 +916,45 @@ final class WeftViewModel {
         }
     }
 
-    /// Remove topic entries (and follow-ups) pointing at messages that aren't
-    /// in this conversation. Returns true if anything was removed.
-    static func dropForeignMessages(_ cached: inout CachedAnalysis, keeping ids: Set<Int64>) -> Bool {
-        let before = cached.topics.reduce(0) { $0 + $1.messageIds.count } + cached.loops.count
-        cached.topics = cached.topics.map { t in
-            var t = t
-            t.messageIds.removeAll { !ids.contains($0) }
-            return t
-        }.filter { !$0.messageIds.isEmpty }
+    /// Remove topics (and follow-ups) built from messages that aren't in
+    /// this conversation. A topic that mixed in another conversation's
+    /// messages can't be trusted (its title and summary came from them), so
+    /// it's taken apart: its own messages are returned to be sorted again.
+    /// Returns whether anything changed, and the messages to re-sort.
+    static func dropForeignMessages(_ cached: inout CachedAnalysis, keeping ids: Set<Int64>) -> (changed: Bool, refile: [Int64]) {
+        var refile: [Int64] = []
+        var changed = false
+        cached.topics = cached.topics.filter { t in
+            let own = t.messageIds.filter(ids.contains)
+            guard own.count != t.messageIds.count else { return true }
+            changed = true
+            refile += own
+            return false
+        }
+        let loopsBefore = cached.loops.count
         cached.loops.removeAll { loop in loop.sourceMessageId.map { !ids.contains($0) } ?? false }
+        if cached.loops.count != loopsBefore { changed = true }
         cached.followUpQueue = cached.followUpQueue?.filter(ids.contains)
-        return cached.topics.reduce(0) { $0 + $1.messageIds.count } + cached.loops.count != before
+        return (changed, refile.sorted())
+    }
+
+    /// Right-click → Remove Topic: the topic goes away and its messages are
+    /// sorted again into the right topics.
+    func removeTopic(_ id: UUID) {
+        guard let chat = settings.selectedChatRowID, let topic = topics.first(where: { $0.id == id }) else { return }
+        let ids = Set(topic.messageIds)
+        for i in ids { provisionalTopic[i] = nil }
+        pendingMessageIDs.subtract(ids)
+        applyEdit(topics.filter { $0.id != id }, chat: chat)
+        refile(messages.filter { ids.contains($0.id) })
+    }
+
+    /// Put messages back in the waiting list and sort them again.
+    private func refile(_ list: [ChatMessage]) {
+        guard !list.isEmpty, let chat = settings.selectedChatRowID else { return }
+        showProvisionally(list)
+        saveCache(chat: chat, filedThrough: Self.checkpoint(messages: messages, pending: pendingMessageIDs))
+        scheduleAutoSort(after: 0)
     }
 
     /// Open this conversation in Messages. One-to-one conversations open to

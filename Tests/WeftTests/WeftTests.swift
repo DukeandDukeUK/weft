@@ -887,10 +887,34 @@ final class WeftTests: XCTestCase {
         vm.reader = ChatDBReader(path: path)
         vm.background.reader = vm.reader
         await vm.selectChat(ChatInfo(id: b, participants: "y", messageCount: 2, lastDate: nil, lastSnippet: nil))
-        XCTAssertEqual(Set(vm.topics.map(\.title)), ["B topic", "Mixed"])
-        XCTAssertEqual(vm.topics.first { $0.title == "Mixed" }?.messageIds, [3])
+        // The mixed topic is taken apart (its title came from A); B's own
+        // message in it waits to be sorted again.
+        XCTAssertFalse(vm.topics.contains { $0.title == "Mixed" || $0.title == "A topic" })
+        XCTAssertTrue(vm.pendingMessageIDs.contains(3), "B's message from the mixed topic wasn't re-sorted")
         XCTAssertTrue(vm.loops.isEmpty)
-        XCTAssertEqual(SegmentationCache.load(chatId: b)?.topics.flatMap(\.messageIds).sorted(), [2, 3], "the cleaned version wasn't saved")
+        XCTAssertEqual(SegmentationCache.load(chatId: b)?.topics.map(\.title), ["B topic"], "the cleaned version wasn't saved")
+    }
+
+    // Right-click → Remove Topic: the topic goes and its messages are sorted
+    // again into the right topics.
+    func testRemoveTopicResortsItsMessages() async throws {
+        LLMClient.testResponder = { _, _ in #"{"assignments":[{"start":0,"end":1,"topic":0}],"newLoops":[],"resolvedLoops":[]}"# }
+        let vm = WeftViewModel()
+        vm.chats = [ChatInfo(id: 2_900, participants: "x", messageCount: 3, lastDate: nil, lastSnippet: nil)]
+        let before = vm.settings.selectedChatRowID
+        defer { vm.settings.selectedChatRowID = before }
+        vm.settings.selectedChatRowID = 2_900
+        vm.settings.grantConsent(2_900)
+        let keep = Topic(id: UUID(), title: "Right", summary: "", messageIds: [1])
+        let wrong = Topic(id: UUID(), title: "Wrong", summary: "", messageIds: [2, 3])
+        vm.messages = [msg(1), msg(2), msg(3)]
+        vm.topics = [keep, wrong]
+        vm.removeTopic(wrong.id)
+        XCTAssertFalse(vm.topics.contains { $0.id == wrong.id })
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(vm.topics.map(\.title), ["Right"])
+        XCTAssertEqual(vm.topics.first?.messageIds, [1, 2, 3], "the messages weren't sorted again")
+        XCTAssertTrue(vm.pendingMessageIDs.isEmpty)
     }
 
     // MARK: - 0.3.3 removing a conversation forgets it
