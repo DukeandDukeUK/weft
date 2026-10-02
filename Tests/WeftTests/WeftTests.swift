@@ -454,4 +454,49 @@ final class WeftTests: XCTestCase {
         vm.resyncAllReminders()
         XCTAssertEqual(seen, [1_301, 1_302])
     }
+
+    // MARK: - 0.2.4 fixes (Astra's 0.2.3 review)
+
+    // Removing a conversation cancels its reminders; global changes also
+    // clean up reminders of removed conversations.
+    func testRemovedConversationRemindersAreCancelled() async {
+        let vm = WeftViewModel()
+        let before = vm.settings.followedChats
+        vm.settings.followedChats = [1_401, 1_402]
+        defer { vm.settings.followedChats = before }
+        var synced: [Int64: [OpenLoop]] = [:]
+        Notifier.syncObserver = { chat, loops in synced[chat] = loops }
+        defer { Notifier.syncObserver = nil }
+        await vm.removeConversation(1_402)
+        XCTAssertEqual(synced[1_402]?.count, 0, "removed conversation's reminders weren't cancelled")
+        var kept: Set<Int64>?
+        Notifier.purgeObserver = { kept = $0 }
+        defer { Notifier.purgeObserver = nil }
+        vm.resyncAllReminders()
+        XCTAssertEqual(kept, [1_401], "orphaned reminders aren't purged on a settings change")
+    }
+
+    // Merging away the AI's chosen topic mid-sort: no untitled topic, and the
+    // message lands in the topic it was merged into.
+    func testMergeDuringSortFollowsTheMerge() async throws {
+        LLMClient.testResponder = { _, _ in
+            try await Task.sleep(nanoseconds: 300_000_000)
+            return #"{"assignments":[{"start":0,"end":0,"topic":0}],"newLoops":[],"resolvedLoops":[]}"#
+        }
+        let vm = WeftViewModel()
+        vm.chats = [ChatInfo(id: 1_500, participants: "x", messageCount: 3, lastDate: nil, lastSnippet: nil)]
+        vm.settings.selectedChatRowID = 1_500
+        vm.settings.grantConsent(1_500)
+        let a = Topic(id: UUID(), title: "A", summary: "", messageIds: [1])
+        let b = Topic(id: UUID(), title: "B", summary: "", messageIds: [2])
+        vm.messages = [msg(1), msg(2), msg(3)]
+        vm.topics = [a, b]                                   // AI will pick topic 0 = A
+        vm.pendingMessageIDs = [3]
+        vm.retryFiling()
+        try await Task.sleep(nanoseconds: 100_000_000)
+        vm.editTopics("Merge Topics", undoManager: nil) { TopicEditor.merge($0, a.id, into: b.id) }
+        try await Task.sleep(nanoseconds: 600_000_000)
+        XCTAssertFalse(vm.topics.contains { $0.title.trimmingCharacters(in: .whitespaces).isEmpty }, "an untitled topic was created")
+        XCTAssertEqual(vm.topics.first { $0.id == b.id }?.messageIds, [1, 2, 3])
+    }
 }

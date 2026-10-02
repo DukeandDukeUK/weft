@@ -56,6 +56,24 @@ enum TopicEditor {
         return (rest + [new], new.id)
     }
 
+    /// Where an AI assignment should go now. The topic it named may have
+    /// been merged away while the AI was working: then use the topic that
+    /// now holds its messages. Nil = it's gone entirely.
+    static func currentIndex(of candidate: Topic, in topics: [Topic]) -> Int? {
+        if let exact = topics.firstIndex(where: { $0.id == candidate.id }) { return exact }
+        let ids = Set(candidate.messageIds)
+        return topics.indices.max { a, b in
+            topics[a].messageIds.filter(ids.contains).count < topics[b].messageIds.filter(ids.contains).count
+        }.flatMap { topics[$0].messageIds.contains(where: ids.contains) ? $0 : nil }
+    }
+
+    /// A new topic's title: the AI's, or (redirect case) the old topic's —
+    /// never empty.
+    static func title(_ proposed: String, fallback: String) -> String {
+        let t = proposed.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? (fallback.isEmpty ? "Untitled topic" : fallback) : t
+    }
+
     /// Undo/Redo without losing later work: go back to `target`, but keep
     /// any message that was filed after the edit (present in `current`,
     /// absent from `applied`) in the topic it's in now.

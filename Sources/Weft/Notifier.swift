@@ -84,6 +84,24 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// date. Replaces this conversation's earlier ones. Removal and adding
     /// happen together, and only for the newest sync, so a slow older sync
     /// can't delete the reminders a newer one just added.
+    /// Cancel every pending Weft reminder that doesn't belong to one of
+    /// these conversations (e.g. ones you removed).
+    nonisolated(unsafe) static var purgeObserver: ((_ keep: Set<Int64>) -> Void)?
+
+    func removeReminders(exceptChats keep: Set<Int64>) {
+        Self.purgeObserver?(keep)
+        guard let center else { return }
+        center.getPendingNotificationRequests { pending in
+            let orphans = pending.map(\.identifier).filter { id in
+                guard id.hasPrefix("weft-loop-") else { return false }
+                let parts = id.dropFirst("weft-loop-".count).split(separator: "-", maxSplits: 1)
+                guard let chat = parts.first.flatMap({ Int64($0) }) else { return true }
+                return !keep.contains(chat)
+            }
+            center.removePendingNotificationRequests(withIdentifiers: orphans)
+        }
+    }
+
     /// Tests watch reminder syncs through this.
     nonisolated(unsafe) static var syncObserver: ((_ chat: Int64, _ loops: [OpenLoop]) -> Void)?
 

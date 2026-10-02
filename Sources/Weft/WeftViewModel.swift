@@ -730,7 +730,8 @@ final class WeftViewModel {
             for a in result.assignments {
                 let ids = a.messageIds.filter { !already.contains($0) }
                 guard !ids.isEmpty else { continue }
-                if let i = a.topicIndex, let target = topics.firstIndex(where: { $0.id == candidates[i].id }) {
+                let named = a.topicIndex.map { candidates[$0] }
+                if let named, let target = TopicEditor.currentIndex(of: named, in: topics) {
                     topics[target].messageIds.append(contentsOf: ids)
                     topics[target].messageIds.sort()
                     // Only if this chunk holds the thread's newest messages —
@@ -740,7 +741,9 @@ final class WeftViewModel {
                         topics[target].summary = s
                     }
                 } else {
-                    topics.append(Topic(id: UUID(), title: a.newTitle, summary: a.newSummary, messageIds: ids))
+                    topics.append(Topic(id: UUID(), title: TopicEditor.title(a.newTitle, fallback: named?.title ?? ""),
+                                        summary: a.newSummary.isEmpty ? (named?.summary ?? "") : a.newSummary,
+                                        messageIds: ids))
                 }
                 placed += ids.count
             }
@@ -904,6 +907,8 @@ final class WeftViewModel {
     /// it back later is instant.
     func removeConversation(_ id: Int64) async {
         settings.followedChats.removeAll { $0 == id }
+        // Its reminders go too.
+        Notifier.shared.syncReminders(loops: [], chat: id, conversationName: "", settings: settings)
         background.markRead(id)
         guard settings.selectedChatRowID == id else { return }
         if let next = followedChats.first {
@@ -1086,12 +1091,16 @@ final class WeftViewModel {
                 // this was running stays where you put it.
                 let stillWaiting = a.messageIds.filter { pendingMessageIDs.contains($0) }
                 guard !stillWaiting.isEmpty else { continue }
-                if let i = a.topicIndex,
-                   let target = base.firstIndex(where: { $0.id == candidates[i].id }) {
+                // The named topic may have been merged away meanwhile:
+                // follow it to where its messages are now.
+                let named = a.topicIndex.map { candidates[$0] }
+                if let named, let target = TopicEditor.currentIndex(of: named, in: base) {
                     base[target].messageIds.append(contentsOf: stillWaiting)
                     if let s = a.updatedSummary, !s.isEmpty { base[target].summary = s }
                 } else {
-                    base.append(Topic(id: UUID(), title: a.newTitle, summary: a.newSummary, messageIds: stillWaiting))
+                    base.append(Topic(id: UUID(), title: TopicEditor.title(a.newTitle, fallback: named?.title ?? ""),
+                                      summary: a.newSummary.isEmpty ? (named?.summary ?? "") : a.newSummary,
+                                      messageIds: stillWaiting))
                 }
                 filed.formUnion(stillWaiting)
             }
@@ -1209,6 +1218,8 @@ final class WeftViewModel {
     /// Notification settings changed (allow / hide text / sound): rebuild
     /// or cancel every conversation's scheduled reminders, not just this one.
     func resyncAllReminders() {
+        // Reminders from conversations you've since removed: cancel them.
+        Notifier.shared.removeReminders(exceptChats: Set(settings.followedChats))
         for chat in settings.followedChats {
             let chatLoops = chat == settings.selectedChatRowID ? loops : (SegmentationCache.load(chatId: chat)?.loops ?? [])
             let name = chats.first { $0.id == chat }.map { ContactNames.shared.shortDisplay($0.participants) } ?? "Weft"
