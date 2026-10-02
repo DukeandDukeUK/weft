@@ -55,7 +55,15 @@ Settings shows which of these are already on your Mac, and offers a **Model** me
 
 **No subscription?** Choose **Ollama (local)** in Settings. Install Ollama from the link Weft shows, come back, and click **Download** to get the recommended model (about 2.5–5 GB, depending on your Mac's memory). Local models are free and private, but they sort less well than the subscription AIs and can only look at a shorter stretch of the conversation at a time.
 
-Sorting uses a small amount of your plan's usage each time new messages arrive. Check your provider's terms for how they allow their command-line tools to be used.
+Sorting uses a small amount of your plan's usage each time new messages arrive. For a sense of scale, here is what the same work would cost at pay-as-you-go API prices (Weft itself never uses API keys — with a subscription it simply comes out of your plan's allowance):
+
+| Work | Claude Sonnet 5.5 | Claude Haiku 4.5 | GPT-6 Luna |
+|---|---|---|---|
+| Filing one new message and its reply (~5,000 tokens) | ~1.4¢ | ~0.7¢ | ~0.07¢ |
+| 100 messages and replies | ~$1.40 | ~70¢ | ~7¢ |
+| First sort of a long conversation (~100,000 tokens, once) | ~25¢ | ~12¢ | ~1¢ |
+
+Based on list prices per million tokens (input / output): Sonnet 5.5 $2 / $10, Haiku 4.5 $1 / $5, GPT-6 Luna $0.10 / $0.50. Prices change; check each provider for current rates. Check your provider's terms for how they allow their command-line tools to be used.
 
 ## Privacy
 
