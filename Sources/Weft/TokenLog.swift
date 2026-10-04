@@ -27,6 +27,7 @@ enum CallPurpose: String, Sendable, Codable {
     case history = "Sorting older history"
     case openLoops = "Open loops"   // stored name; shown as "Follow-ups"
     case connectionTest = "Connection test"
+    case summary = "Topic summary"
     case other = "Other"
 
     /// On-screen name (the stored names above stay as they are so older

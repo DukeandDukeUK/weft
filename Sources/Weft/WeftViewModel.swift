@@ -293,6 +293,7 @@ final class WeftViewModel {
                 showProvisionally(messages.filter { $0.id > cached.newestRowId && !filed.contains($0.id) })
                 let toRefile = Set(repair.refile)
                 showProvisionally(messages.filter { toRefile.contains($0.id) })
+                fillMissingSummaries()
                 if hasWaitingWork { scheduleAutoSort(after: 0) }
             } else if !messages.isEmpty {
                 // First time: the consent check (at the AI call) asks first.
@@ -648,6 +649,52 @@ final class WeftViewModel {
         for id in movedByHand { provisionalTopic[id] = nil }
         applyEdit(after, chat: chat)
         registerEditUndo(actionName, undoManager: undoManager, chat: chat, target: before, applied: topics)
+        fillMissingSummaries()
+    }
+
+    /// Topics you made by hand (Move to New Topic, Split) start without a
+    /// summary: ask the AI for one, in the same style as the sorted ones.
+    /// Your title is kept. Only with your OK for this conversation.
+    private var summarizing: Set<UUID> = []
+    func fillMissingSummaries() {
+        guard let chat = settings.selectedChatRowID, settings.hasConsent(chat),
+              !settings.pausedChats.contains(chat) else { return }
+        for topic in topics where topic.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !summarizing.contains(topic.id) {
+            summarize(topic.id, chat: chat)
+        }
+    }
+
+    private func summarize(_ id: UUID, chat: Int64) {
+        guard let topic = topics.first(where: { $0.id == id }), var client = clientForUpload() else { return }
+        client.effort = "low"
+        let ids = Set(topic.messageIds)
+        var transcript = ""
+        for m in messages.filter({ ids.contains($0.id) }).suffix(40) {
+            var text = m.text.replacingOccurrences(of: "\n", with: " ")
+            if text.count > 400 { text = String(text.prefix(400)) + "…" }
+            transcript += "\(m.speaker): \(text)\n"
+        }
+        guard !transcript.isEmpty else { return }
+        summarizing.insert(id)
+        let mySession = session
+        let system = """
+            You summarize one topic from a chat between a person ("You") and others. Reply with ONE sentence of at most
+            25 words saying what was discussed and where it ended up, addressing the person as "You" (e.g. "You chose
+            the Ember Mug as a gift and declined a reminder."). Only the sentence: no quotes, no markdown.
+            """
+        Task { [weak self] in
+            let raw = try? await client.complete(systemPrompt: system, userPrompt: "TOPIC: \(topic.title)\n\n" + transcript, purpose: .summary)
+            guard let self else { return }
+            self.summarizing.remove(id)
+            guard mySession == self.session, let raw,
+                  let index = self.topics.firstIndex(where: { $0.id == id }),
+                  self.topics[index].summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            let sentence = TopicSegmenter.stripFences(raw).trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "\"")))
+            guard !sentence.isEmpty else { return }
+            self.topics[index].summary = String(sentence.prefix(300))
+            self.saveCache(chat: chat, filedThrough: Self.checkpoint(messages: self.messages, pending: self.pendingMessageIDs))
+        }
     }
 
     private func applyEdit(_ newTopics: [Topic], chat: Int64) {

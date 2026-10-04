@@ -917,6 +917,30 @@ final class WeftTests: XCTestCase {
         XCTAssertTrue(vm.pendingMessageIDs.isEmpty)
     }
 
+    // MARK: - 0.3.6 hand-made topics get a summary
+
+    func testHandMadeTopicGetsASummary() async throws {
+        var asked = ""
+        LLMClient.testResponder = { system, input in
+            asked = input
+            return system.contains("You summarize one topic") ? "You decided on a handwashable heated mug." : "[]"
+        }
+        let vm = WeftViewModel()
+        vm.chats = [ChatInfo(id: 3_000, participants: "x", messageCount: 2, lastDate: nil, lastSnippet: nil)]
+        let before = vm.settings.selectedChatRowID
+        defer { vm.settings.selectedChatRowID = before }
+        vm.settings.selectedChatRowID = 3_000
+        vm.settings.grantConsent(3_000)
+        vm.messages = [msg(1, "best handwashable heated mug?", me: true), msg(2, "Try the Ember")]
+        vm.topics = [Topic(id: UUID(), title: "Mugs", summary: "Old summary", messageIds: [1, 2])]
+        vm.editTopics("Move to New Topic", undoManager: nil) { TopicEditor.moveToNew($0, messages: [1, 2], title: "Heated mug").topics }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(vm.topics.first?.title, "Heated mug", "your title must be kept")
+        XCTAssertEqual(vm.topics.first?.summary, "You decided on a handwashable heated mug.")
+        XCTAssertTrue(asked.contains("best handwashable heated mug?"))
+        XCTAssertEqual(SegmentationCache.load(chatId: 3_000)?.topics.first?.summary, "You decided on a handwashable heated mug.")
+    }
+
     // MARK: - 0.3.3 removing a conversation forgets it
 
     func testRemovingConversationForgetsItsTopics() async throws {
