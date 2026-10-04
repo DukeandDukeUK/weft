@@ -189,8 +189,10 @@ struct MessageRow: View {
                     // repeat them.
                     if (message.attachments.isEmpty || message.text != "[attachment]")
                         && !(message.link.map { LinkText.isJustTheLink(message.text, $0.url) } ?? false) {
+                        // Not selectable: selectable text takes the right-click
+                        // for macOS's own text menu, hiding Weft's (Move to
+                        // Topic…). The menu has Copy Text instead.
                         Text(LinkText.attributed(message.text))
-                            .textSelection(.enabled)
                             // Links in your (indigo) bubbles stay white, underlined.
                             .tint(message.isFromMe ? Color.white : WeftStyle.accent)
                             .padding(.horizontal, 14)
