@@ -941,6 +941,26 @@ final class WeftTests: XCTestCase {
         XCTAssertEqual(SegmentationCache.load(chatId: 3_000)?.topics.first?.summary, "You decided on a handwashable heated mug.")
     }
 
+    // MARK: - 0.3.7 Haiku 5.5
+
+    // Haiku 5.5 sometimes puts null entries in its lists; the rest of the
+    // reply must still be used.
+    func testNullEntriesInRepliesAreSkipped() throws {
+        let raw = #"{"assignments":[{"start":0,"end":1,"topic":0}],"newLoops":[null,{"title":"Call contractor","detail":"","message":0,"owner":"me"}],"yourPromises":[{"message":0,"promise":"Call them"},null],"resolvedLoops":[]}"#
+        let r = try TopicFiler.parse(raw, newMessages: [msg(10, "I'll call them", me: true), msg(11, "ok")],
+                                     topics: [Topic(id: UUID(), title: "A", summary: "", messageIds: [1])], openLoops: [])
+        XCTAssertEqual(r.assignments.count, 1)
+        XCTAssertEqual(r.newLoops.count, 1, "the promise duplicates the listed follow-up, so one in total")
+    }
+
+    // Haiku 5.5 has a ~100k-token limit: full sorts send less to it.
+    func testHaikuGetsASmallerTranscript() {
+        var c = LLMClient(provider: .claude, model: "claude-haiku-5-5")
+        XCTAssertEqual(c.transcriptCharLimit, 240_000)
+        c.model = "claude-sonnet-5-5"
+        XCTAssertEqual(c.transcriptCharLimit, 400_000)
+    }
+
     // MARK: - 0.3.3 removing a conversation forgets it
 
     func testRemovingConversationForgetsItsTopics() async throws {

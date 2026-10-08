@@ -197,7 +197,12 @@ struct LLMClient: Sendable {
 
     static let timeout: TimeInterval = 600
 
-    var transcriptCharLimit: Int { provider.transcriptCharLimit }
+    var transcriptCharLimit: Int {
+        // Haiku 5.5 takes about 100k tokens in total: keep the transcript
+        // to roughly 60–70k so the instructions and the reply still fit.
+        if provider == .claude, model.lowercased().contains("haiku-5") { return 240_000 }
+        return provider.transcriptCharLimit
+    }
 
     /// Runs one call and records its token use in the token log.
     /// Tests set this to stand in for the AI (scripted replies, delays,

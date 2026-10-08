@@ -81,8 +81,9 @@ struct TopicFiler: Sendable {
 
     private struct ResponseDTO: Decodable {
         let assignments: [AssignmentDTO]
-        let newLoops: [LoopDTO]?
-        let yourPromises: [PromiseDTO]?
+        // Lists may contain null entries (Haiku 5.5 sends them): skipped.
+        let newLoops: [LoopDTO?]?
+        let yourPromises: [PromiseDTO?]?
         let resolvedLoops: [LoopRef]?
     }
 
@@ -194,7 +195,7 @@ struct TopicFiler: Sendable {
             ))
         }
         let now = Date()
-        var loops = (dto.newLoops ?? []).map {
+        var loops = (dto.newLoops ?? []).compactMap { $0 }.map {
             OpenLoop(
                 id: UUID(),
                 title: $0.title.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -207,7 +208,7 @@ struct TopicFiler: Sendable {
             )
         }.filter { !$0.title.isEmpty }
         var mine: [OpenLoop] = []
-        for p in dto.yourPromises ?? [] {
+        for p in (dto.yourPromises ?? []).compactMap({ $0 }) {
             guard let i = p.message, newMessages.indices.contains(i), newMessages[i].isFromMe,
                   let title = p.promise?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else { continue }
             let id = newMessages[i].id

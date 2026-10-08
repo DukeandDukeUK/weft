@@ -38,9 +38,10 @@ struct OpenLoopDetector: Sendable {
         // An unreadable reply is an error, not "nothing outstanding".
         let cleaned = TopicSegmenter.stripFences(raw)
         guard let data = cleaned.data(using: .utf8),
-              let dtos = try? JSONDecoder().decode([LoopDTO].self, from: data) else {
+              let decoded = try? JSONDecoder().decode([LoopDTO?].self, from: data) else {
             throw TopicSegmenter.AnalysisError.badJSON(raw)
         }
+        let dtos = decoded.compactMap { $0 }   // null entries are skipped
         let now = Date()
         return dtos
             .map { dto in

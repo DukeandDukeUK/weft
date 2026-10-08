@@ -79,6 +79,7 @@ final class RecommendationStore {
         "claude": .init(recommended: "claude-sonnet-5-5", note: "Sorts well and uses little of your plan.", models: [
             .init(id: "claude-sonnet-5-5", label: "Sonnet 5.5"),
             .init(id: "claude-opus-5-5", label: "Opus 5.5"),
+            .init(id: "claude-haiku-5-5", label: "Haiku 5.5"),
             .init(id: "claude-haiku-4-5-20251001", label: "Haiku 4.5"),
         ]),
         "codex": .init(recommended: "gpt-6-luna", note: "Light on your ChatGPT plan's usage."),
