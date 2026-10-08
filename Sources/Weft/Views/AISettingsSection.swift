@@ -122,7 +122,7 @@ struct AISettingsSection: View {
             Text(note).font(.caption).foregroundStyle(.secondary)
         }
         Toggle("Also sort older history", isOn: Bindable(settings).sortOlderHistory)
-        Text("After the first sort, keeps sorting the rest of a long conversation in the background. Very long histories use more of your plan.")
+        Text("Long conversations are sorted in stages. The first sort covers the most recent messages — as many as your AI can read at once, which is fewer for local and smaller models. With this on, Weft then sorts the older messages in the background, a batch at a time, until the whole conversation is sorted. Turn it off to sort only the recent part. With a subscription AI, very long histories use more of your plan.")
             .font(.caption)
             .foregroundStyle(.secondary)
         if provider == .codex {
