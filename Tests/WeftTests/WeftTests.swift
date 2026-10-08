@@ -961,6 +961,16 @@ final class WeftTests: XCTestCase {
         XCTAssertEqual(c.transcriptCharLimit, 400_000)
     }
 
+    // MARK: - 0.3.9 text size
+
+    func testTextSizeSteps() {
+        XCTAssertEqual(TextScale.step(from: 1, by: 1), 1.15)
+        XCTAssertEqual(TextScale.step(from: 1.5, by: 1), 1.5, "stops at the largest")
+        XCTAssertEqual(TextScale.step(from: 0.85, by: -1), 0.85, "stops at the smallest")
+        XCTAssertEqual(TextScale.nearest(1.12), 1.15)
+        XCTAssertEqual(TextScale.baseSize(.body) * 1.3, 16.9, accuracy: 0.01)
+    }
+
     // MARK: - 0.3.3 removing a conversation forgets it
 
     func testRemovingConversationForgetsItsTopics() async throws {

@@ -34,7 +34,7 @@ struct SidebarView: View {
                             : (viewModel.background.unreadCounts[chat.id] ?? 0)
                         if count > 0 {
                             Text("\(count)")
-                                .font(.caption2.weight(.bold))
+                                .scaledFont(.caption2, weight: .bold)
                                 .monospacedDigit()
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 6)
@@ -100,7 +100,7 @@ struct SidebarView: View {
                                 Text(topic.title).lineLimit(1)
                                 if !topic.summary.isEmpty {
                                     Text(topic.summary)
-                                        .font(.caption)
+                                        .scaledFont(.caption)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(2)
                                 }
@@ -113,7 +113,7 @@ struct SidebarView: View {
                         VStack(alignment: .trailing, spacing: 3) {
                             if let date = viewModel.lastActivity(of: topic) {
                                 Text(RelativeTime.short(date))
-                                    .font(.caption2)
+                                    .scaledFont(.caption2)
                                     .foregroundStyle(.secondary)
                             }
                             CountText(count: topic.messageIds.count)
@@ -144,15 +144,15 @@ struct SidebarView: View {
                     Text("Topics")
                     Spacer()
                     if let err = viewModel.historyError {
-                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.caption2)
-                        Text("Couldn't sort older messages").font(.caption2).foregroundStyle(.secondary)
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).scaledFont(.caption2)
+                        Text("Couldn't sort older messages").scaledFont(.caption2).foregroundStyle(.secondary)
                             .help(err)
                         Button("Retry") { viewModel.retryHistory() }
-                            .buttonStyle(.link).font(.caption2)
+                            .buttonStyle(.link).scaledFont(.caption2)
                     } else if let p = viewModel.historyProgress, p.total > 0 {
                         ProgressView().controlSize(.mini)
                         Text("Sorting older messages… \(Int(Double(p.done) / Double(p.total) * 100))%")
-                            .font(.caption2)
+                            .scaledFont(.caption2)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -172,7 +172,7 @@ struct SidebarView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         if active.isEmpty {
                             Text(viewModel.loops.isEmpty ? "None found yet." : "Nothing outstanding.")
-                                .font(.caption)
+                                .scaledFont(.caption)
                                 .foregroundStyle(.secondary)
                                 .padding(.leading, 6)
                         }
@@ -226,12 +226,12 @@ struct SidebarView: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
+                    .scaledFont(.caption, weight: .semibold)
                     .rotationEffect(.degrees(isOpen.wrappedValue ? 90 : 0))
                 Text(title)
                 Spacer()
             }
-            .font(.callout)
+            .scaledFont(.callout)
             .foregroundStyle(.secondary)
             .padding(.leading, 6)
             .padding(.vertical, 3)
@@ -244,7 +244,7 @@ struct SidebarView: View {
 
     private func groupLabel(_ text: String) -> some View {
         Text(text)
-            .font(.caption.weight(.semibold))
+            .scaledFont(.caption, weight: .semibold)
             .foregroundStyle(.secondary)
             .padding(.leading, 6)
             .padding(.top, 4)
@@ -260,7 +260,7 @@ struct SidebarView: View {
                     Text(loop.title).lineLimit(2)
                     if loop.status == .open, let due = loop.dueDate {
                         Text(loop.isOverdue(at: now) ? "Overdue · \(due.formatted(.dateTime.month(.abbreviated).day()))" : "Due \(due.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))")
-                            .font(.caption2)
+                            .scaledFont(.caption2)
                             .foregroundStyle(loop.isOverdue(at: now) ? Color.red : Color.secondary)
                     }
                 }
@@ -336,7 +336,7 @@ private struct CountText: View {
 
     var body: some View {
         Text("\(count)")
-            .font(.caption)
+            .scaledFont(.caption)
             .monospacedDigit()
             .foregroundStyle(.secondary)
     }

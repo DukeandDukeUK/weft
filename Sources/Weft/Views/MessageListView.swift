@@ -178,7 +178,7 @@ struct MessageRow: View {
             VStack(alignment: message.isFromMe ? .trailing : .leading, spacing: 3) {
                 if let senderLabel, !senderLabel.isEmpty {
                     Text(senderLabel)
-                        .font(.caption.weight(.medium))
+                        .scaledFont(.caption, weight: .medium)
                         .foregroundStyle(.secondary)
                         .padding(.leading, 12)
                 }
@@ -220,7 +220,7 @@ struct MessageRow: View {
                     .padding(.top, message.reactions.isEmpty ? 0 : 16)
                     .frame(maxWidth: 560, alignment: message.isFromMe ? .trailing : .leading)
                 Text(Self.timeFormatter.string(from: message.date))
-                    .font(.caption2)
+                    .scaledFont(.caption2)
                     .foregroundStyle(.secondary)
             }
             if !message.isFromMe { Spacer(minLength: 48) }
@@ -237,7 +237,7 @@ struct ReactionBadge: View {
     var body: some View {
         HStack(spacing: 2) {
             ForEach(Array(reactions.enumerated()), id: \.offset) { _, reaction in
-                Text(reaction.emoji).font(.system(size: 13))
+                Text(reaction.emoji).scaledFont(.body)
             }
         }
         .padding(.horizontal, 7)
@@ -257,7 +257,7 @@ struct ReactionBadge: View {
                         Avatar(handle: r.isFromMe ? nil : r.sender)
                         Text(Self.name(for: r)).lineLimit(1)
                         Spacer(minLength: 12)
-                        Text(r.emoji).font(.title3)
+                        Text(r.emoji).scaledFont(.title3)
                     }
                 }
             }
@@ -317,7 +317,7 @@ struct DayDivider: View {
 
     var body: some View {
         Text(Self.dayFormatter.string(from: date))
-            .font(.caption.weight(.medium))
+            .scaledFont(.caption, weight: .medium)
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 6)

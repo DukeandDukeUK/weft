@@ -30,7 +30,7 @@ struct ComposeView: View {
         VStack(alignment: .leading, spacing: 4) {
             if let recipientLine {
                 Text(recipientLine)
-                    .font(.caption)
+                    .scaledFont(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .padding(.leading, 16)
@@ -45,14 +45,14 @@ struct ComposeView: View {
                     axis: .vertical
                 )
                 .textFieldStyle(.plain)
-                .font(.body)
+                .scaledFont(.body)
                 .lineLimit(1...6)
                 .onSubmit(send)
                 .padding(.vertical, 8)
                 .accessibilityLabel(recipientLine.map { "Message, \($0)" } ?? "Message")
                 Button(action: send) {
                     Image(systemName: "arrow.up")
-                        .font(.body.weight(.bold))
+                        .scaledFont(.body, weight: .bold)
                         .frame(width: 18, height: 18)
                 }
                 .glassButton(prominent: true)
@@ -173,12 +173,12 @@ struct SearchResultsView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 if let conversation {
-                    Text(conversation).font(.caption).bold().foregroundStyle(WeftStyle.accent)
+                    Text(conversation).scaledFont(.caption).bold().foregroundStyle(WeftStyle.accent)
                 }
-                Text(message.speaker).font(.caption).bold().foregroundStyle(.secondary)
+                Text(message.speaker).scaledFont(.caption).bold().foregroundStyle(.secondary)
                 Spacer()
                 if let topic {
-                    Text(topic).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(topic).scaledFont(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
             Text(message.text).lineLimit(3)
@@ -186,7 +186,7 @@ struct SearchResultsView: View {
                 Text(message.date, style: .date)
                 Text(message.date, style: .time)
             }
-            .font(.caption2)
+            .scaledFont(.caption2)
             .foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
@@ -210,13 +210,13 @@ struct LoopDetailView: View {
                 .glassButton()
                 .keyboardShortcut(.escape, modifiers: [])
                 Text(loop.title)
-                    .font(.title2)
+                    .scaledFont(.title2)
                     .bold()
                 Text(loop.detail)
-                    .font(.body)
+                    .scaledFont(.body)
                     .textSelection(.enabled)
                 Text("Detected \(loop.createdDate, style: .date)")
-                    .font(.caption)
+                    .scaledFont(.caption)
                     .foregroundStyle(.secondary)
                 if let id = loop.sourceMessageId,
                    let message = viewModel.messages.first(where: { $0.id == id }) {
@@ -268,7 +268,7 @@ struct LoopDetailView: View {
                 }
                 if loop.dueDate != nil || loop.snoozedUntil != nil {
                     Text("Weft reminds you with a notification at that time.")
-                        .font(.caption)
+                        .scaledFont(.caption)
                         .foregroundStyle(.secondary)
                 }
 

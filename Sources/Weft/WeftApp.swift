@@ -31,6 +31,16 @@ struct WeftApp: App {
                     .keyboardShortcut(KeyEquivalent(Character("\(n)")), modifiers: .command)
                 }
             }
+            // View menu: text size, like Messages.
+            CommandGroup(before: .toolbar) {
+                Button("Bigger Text") { AppSettings.shared.biggerText() }
+                    .keyboardShortcut("+", modifiers: .command)
+                Button("Smaller Text") { AppSettings.shared.smallerText() }
+                    .keyboardShortcut("-", modifiers: .command)
+                Button("Default Size") { AppSettings.shared.textScale = 1 }
+                    .keyboardShortcut("0", modifiers: .command)
+                Divider()
+            }
             CommandGroup(replacing: .appSettings) {
                 Divider()
                 Button("Settings…") {

@@ -115,6 +115,14 @@ final class AppSettings {
     var notificationsOnboarded: Bool { didSet { defaults.set(notificationsOnboarded, forKey: Keys.notifOnboarded) } }
 
     /// "system" (follow macOS), "light" or "dark".
+    /// Text size for the whole app (1 = the Mac's standard sizes).
+    var textScale: Double {
+        didSet { defaults.set(textScale, forKey: Keys.textScale) }
+    }
+
+    func biggerText() { textScale = TextScale.step(from: textScale, by: 1) }
+    func smallerText() { textScale = TextScale.step(from: textScale, by: -1) }
+
     var appearance: String {
         didSet {
             defaults.set(appearance, forKey: Keys.appearance)
@@ -133,6 +141,7 @@ final class AppSettings {
         static let handleId = "weft.handleId"
         static let prefix = "weft.prefixThreadReplies"
         static let appearance = "weft.appearance"
+        static let textScale = "weft.textScale"
         static let followed = "weft.followedChats"
         static let notifyBanners = "weft.notifyBanners"
         static let notifySound = "weft.notifySound"
@@ -160,6 +169,7 @@ final class AppSettings {
         self.selectedHandleId = d.string(forKey: Keys.handleId) ?? ""
         self.prefixThreadReplies = d.object(forKey: Keys.prefix) as? Bool ?? true
         self.appearance = d.string(forKey: Keys.appearance) ?? "system"
+        self.textScale = TextScale.nearest(d.object(forKey: Keys.textScale) as? Double ?? 1)
         var followed = (d.stringArray(forKey: Keys.followed) ?? []).compactMap(Int64.init)
         // Earlier versions followed exactly one conversation.
         if followed.isEmpty, let only = d.string(forKey: Keys.chatRowID).flatMap(Int64.init) { followed = [only] }

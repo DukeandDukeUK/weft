@@ -34,7 +34,7 @@ struct TokenUseSection: View {
                                     .monospacedDigit()
                             }
                             Text("\(Self.timeFormatter.string(from: entry.date)) · \(entry.model)\(entry.usage.map { " · in \(Self.format($0.input)), cached \(Self.format($0.cachedInput)), out \(Self.format($0.output))" } ?? "")")
-                                .font(.caption)
+                                .scaledFont(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -42,7 +42,7 @@ struct TokenUseSection: View {
             }
 
             Text("Counts come from the AI tool itself. Codex and Grok don't report them, so their calls are counted but show no tokens.")
-                .font(.caption)
+                .scaledFont(.caption)
                 .foregroundStyle(.secondary)
 
             Button("Clear token log…", role: .destructive) { confirmClear = true }
@@ -60,7 +60,7 @@ struct TokenUseSection: View {
                 Text("\(Self.format(s.usage.total)) tokens")
                     .monospacedDigit()
                 Text("\(s.calls) call\(s.calls == 1 ? "" : "s") · in \(Self.format(s.usage.input)), cached \(Self.format(s.usage.cachedInput)), out \(Self.format(s.usage.output))\(s.unreported > 0 ? " · \(s.unreported) without counts" : "")")
-                    .font(.caption)
+                    .scaledFont(.caption)
                     .foregroundStyle(.secondary)
             }
         }

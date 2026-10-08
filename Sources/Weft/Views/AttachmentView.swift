@@ -63,7 +63,7 @@ struct AttachmentView: View {
 
     private func chip(symbol: String, text: String) -> some View {
         Label(text, systemImage: symbol)
-            .font(.callout)
+            .scaledFont(.callout)
             .lineLimit(1)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -105,11 +105,11 @@ struct LinkPreviewCard: View {
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(link.title.isEmpty ? link.url.absoluteString : link.title)
-                        .font(.callout.weight(.semibold))
+                        .scaledFont(.callout, weight: .semibold)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                     Text(link.site)
-                        .font(.caption)
+                        .scaledFont(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }

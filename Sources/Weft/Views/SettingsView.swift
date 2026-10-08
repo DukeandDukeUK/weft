@@ -29,7 +29,7 @@ struct SettingsView: View {
             Section("Topics") {
                 Toggle("Start topic replies with “Re: <topic> —”", isOn: Bindable(viewModel.settings).prefixThreadReplies)
                 Text("Other participants see one long chat. The prefix tells them which subject your reply is about.")
-                    .font(.caption)
+                    .scaledFont(.caption)
                     .foregroundStyle(.secondary)
             }
 
@@ -46,7 +46,13 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
                 Text("Automatic follows your Mac's setting in System Settings → Appearance.")
-                    .font(.caption)
+                    .scaledFont(.caption)
+                    .foregroundStyle(.secondary)
+                Picker("Text size", selection: Bindable(viewModel.settings).textScale) {
+                    ForEach(TextScale.steps, id: \.scale) { Text($0.label).tag($0.scale) }
+                }
+                Text("Also in the View menu: Bigger Text ⌘+, Smaller Text ⌘−, Default Size ⌘0.")
+                    .scaledFont(.caption)
                     .foregroundStyle(.secondary)
             }
 
@@ -114,7 +120,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                 Text(detail)
-                    .font(.caption)
+                    .scaledFont(.caption)
                     .foregroundStyle(.secondary)
             }
         }
@@ -164,9 +170,9 @@ struct ChatPickerView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Add a conversation to Weft")
-                        .font(.headline)
+                        .scaledFont(.headline)
                     Text("Each added conversation is kept sorted in the background, which uses a little of your AI plan as new messages arrive.")
-                        .font(.caption)
+                        .scaledFont(.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -195,7 +201,7 @@ struct ChatPickerView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             if viewModel.settings.followedChats.contains(chat.id) {
                                 Label("Added", systemImage: "checkmark.circle.fill")
-                                    .font(.caption)
+                                    .scaledFont(.caption)
                                     .foregroundStyle(WeftStyle.accent)
                             }
                             if chat.participants.isEmpty {
@@ -216,11 +222,11 @@ struct ChatPickerView: View {
                                     Text(Self.dateFormatter.string(from: date))
                                 }
                             }
-                            .font(.caption)
+                            .scaledFont(.caption)
                             .foregroundStyle(.secondary)
                             if let snippet = chat.lastSnippet, !snippet.isEmpty {
                                 Text(snippet)
-                                    .font(.caption)
+                                    .scaledFont(.caption)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(2)
                             }

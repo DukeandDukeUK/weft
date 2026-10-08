@@ -95,7 +95,7 @@ struct NoticeBanner: View {
             Image(systemName: "exclamationmark.triangle")
                 .foregroundStyle(.orange)
             Text(text)
-                .font(.callout)
+                .scaledFont(.callout)
                 .textSelection(.enabled)
             Spacer()
             if let actionLabel, let onAction {
@@ -104,7 +104,7 @@ struct NoticeBanner: View {
                     .controlSize(.small)
             }
             Button { onDismiss() } label: {
-                Image(systemName: "xmark").font(.caption.weight(.semibold))
+                Image(systemName: "xmark").scaledFont(.caption, weight: .semibold)
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -130,14 +130,14 @@ struct StaleBanner: View {
             if failed {
                 Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
                 Text("Couldn't sort \(count) new message\(count == 1 ? "" : "s") — will retry with the next one.")
-                    .font(.callout)
+                    .scaledFont(.callout)
                 Button("Retry", action: onReanalyze)
                     .glassButton()
                     .controlSize(.small)
             } else {
                 ProgressView().controlSize(.small)
                 Text("Sorting \(count) new message\(count == 1 ? "" : "s") into topics…")
-                    .font(.callout)
+                    .scaledFont(.callout)
                     .foregroundStyle(.secondary)
             }
         }
@@ -157,7 +157,7 @@ struct PausedBanner: View {
         HStack(spacing: 8) {
             Image(systemName: "pause.circle").foregroundStyle(.secondary)
             Text(count == 0 ? "Sorting is paused for this conversation." : "Sorting paused — \(count) new message\(count == 1 ? "" : "s") waiting.")
-                .font(.callout)
+                .scaledFont(.callout)
                 .foregroundStyle(.secondary)
             Button("Resume", action: onResume)
                 .glassButton()
@@ -181,14 +181,14 @@ struct BetterModelBanner: View {
             Image(systemName: "sparkles")
             if viewModel.localPull.isRunning {
                 ProgressView(value: viewModel.localPull.fraction) {
-                    Text("Downloading \(tier.model)… \(viewModel.localPull.status)").font(.caption)
+                    Text("Downloading \(tier.model)… \(viewModel.localPull.status)").scaledFont(.caption)
                 }
             } else {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("A better local model is available for this Mac: **\(tier.model)** (about \(tier.size)).")
-                        .font(.callout)
+                        .scaledFont(.callout)
                     if let error = viewModel.localPull.error {
-                        Text(error).font(.caption).foregroundStyle(.secondary)
+                        Text(error).scaledFont(.caption).foregroundStyle(.secondary)
                     }
                 }
                 Spacer()
@@ -224,7 +224,7 @@ struct FullDiskAccessView: View {
                 .font(.system(size: 44))
                 .foregroundStyle(.tint)
             Text("Weft needs Full Disk Access")
-                .font(.title2.bold())
+                .scaledFont(.title2, weight: .bold)
             Text("Messages keeps its history in a protected folder. To read it, macOS needs you to turn on Full Disk Access for Weft. Weft only reads your messages — it never changes them.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
@@ -245,11 +245,11 @@ struct FullDiskAccessView: View {
             .keyboardShortcut(.defaultAction)
 
             Text("Click the button, then turn on the switch next to **Weft**. When macOS asks, click **Quit & Reopen**.")
-                .font(.callout)
+                .scaledFont(.callout)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 460)
             Text("If Weft isn't in the list, click **+**, choose Weft in Applications, and click Open.")
-                .font(.caption)
+                .scaledFont(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 460)
@@ -257,13 +257,13 @@ struct FullDiskAccessView: View {
             if openedSettings {
                 HStack(spacing: 6) {
                     ProgressView().scaleEffect(0.6)
-                    Text("Waiting for you to turn on the switch…").font(.caption).foregroundStyle(.secondary)
+                    Text("Waiting for you to turn on the switch…").scaledFont(.caption).foregroundStyle(.secondary)
                 }
             }
             if showManualRestart {
                 Button("Clicked “Later” on the macOS prompt? Quit & Reopen Weft") { viewModel.relaunch() }
                     .buttonStyle(.link)
-                    .font(.caption)
+                    .scaledFont(.caption)
             }
         }
         .padding(32)
@@ -279,12 +279,12 @@ struct MissingDBView: View {
     var body: some View {
         VStack(spacing: 12) {
             Image(systemName: "message.badge.exclamationmark")
-                .font(.largeTitle)
+                .scaledFont(.largeTitle)
                 .foregroundStyle(.secondary)
             Text("No Messages database found")
-                .font(.headline)
+                .scaledFont(.headline)
             Text("Weft reads your Messages history from ~/Library/Messages/chat.db. Make sure the Messages app is set up and signed in on this Mac (Messages > Settings > iMessage), then grant Full Disk Access in Settings.")
-                .font(.callout)
+                .scaledFont(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 420)
@@ -306,7 +306,7 @@ struct ThreadHeader: View {
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             Button(action: onAll) {
-                Image(systemName: "chevron.left").font(.body.weight(.semibold))
+                Image(systemName: "chevron.left").scaledFont(.body, weight: .semibold)
             }
             .glassButton()
             .buttonBorderShape(.circle)
@@ -314,10 +314,10 @@ struct ThreadHeader: View {
             .help("All messages (Esc)")
             .accessibilityLabel("Back to all messages")
             VStack(alignment: .leading, spacing: 2) {
-                Text(topic.title).font(.headline)
+                Text(topic.title).scaledFont(.headline)
                 if !topic.summary.isEmpty {
                     Text(topic.summary)
-                        .font(.caption)
+                        .scaledFont(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .help(topic.summary)

@@ -51,7 +51,7 @@ struct AISettingsSection: View {
                 providerDetail(provider)
             } else {
                 Text("Pick the AI you already pay for. No subscription? Choose **Ollama (local)** — it's free and runs on this Mac.")
-                    .font(.caption)
+                    .scaledFont(.caption)
                     .foregroundStyle(.secondary)
             }
         }
@@ -77,7 +77,7 @@ struct AISettingsSection: View {
         }
 
         Text(privacyNote(provider))
-            .font(.caption)
+            .scaledFont(.caption)
             .foregroundStyle(.secondary)
     }
 
@@ -119,16 +119,16 @@ struct AISettingsSection: View {
         }
 
         if let note = store.current.entry(provider)?.note {
-            Text(note).font(.caption).foregroundStyle(.secondary)
+            Text(note).scaledFont(.caption).foregroundStyle(.secondary)
         }
         Toggle("Also sort older history", isOn: Bindable(settings).sortOlderHistory)
         Text("Long conversations are sorted in stages. The first sort covers the most recent messages — as many as your AI can read at once, which is fewer for local and smaller models. With this on, Weft then sorts the older messages in the background, a batch at a time, until the whole conversation is sorted. Turn it off to sort only the recent part. With a subscription AI, very long histories use more of your plan.")
-            .font(.caption)
+            .scaledFont(.caption)
             .foregroundStyle(.secondary)
         if provider == .codex {
             Toggle("Fast mode", isOn: Bindable(settings).codexFast)
             Text("About 1.5× faster sorting. ChatGPT may count Fast mode as more of your plan's usage.")
-                .font(.caption)
+                .scaledFont(.caption)
                 .foregroundStyle(.secondary)
         }
     }
@@ -159,7 +159,7 @@ struct AISettingsSection: View {
             }
             if let testResult {
                 Text(testResult)
-                    .font(.caption)
+                    .scaledFont(.caption)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
@@ -172,7 +172,7 @@ struct AISettingsSection: View {
             ollamaSetup(status: status)
         } else {
             Text("Not found on this Mac (\(status.detail)). \(provider.setupHint)")
-                .font(.callout)
+                .scaledFont(.callout)
         }
     }
 
@@ -189,14 +189,14 @@ struct AISettingsSection: View {
                 Button("Get Ollama") { openURL(URL(string: "https://ollama.com/download")!) }
                 Text("2. Come back here and click **Check what's installed**.")
             }
-            .font(.callout)
+            .scaledFont(.callout)
         } else {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Ollama is running. Download the recommended model for this Mac: **\(recommended.name)** (about \(recommended.size)).")
-                    .font(.callout)
+                    .scaledFont(.callout)
                 if pull.isRunning {
                     ProgressView(value: pull.fraction) {
-                        Text(pull.status).font(.caption)
+                        Text(pull.status).scaledFont(.caption)
                     }
                 } else {
                     Button("Download \(recommended.name)") {
@@ -210,12 +210,12 @@ struct AISettingsSection: View {
                     }
                 }
                 if let error = pull.error {
-                    Text("✗ " + error).font(.caption).foregroundStyle(.secondary)
+                    Text("✗ " + error).scaledFont(.caption).foregroundStyle(.secondary)
                 }
             }
         }
         Text("Local models are free and private but sort noticeably less well than the subscription AIs, and handle a shorter stretch of the conversation at a time.")
-            .font(.caption)
+            .scaledFont(.caption)
             .foregroundStyle(.secondary)
     }
 

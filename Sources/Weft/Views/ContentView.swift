@@ -10,6 +10,9 @@ struct ContentView: View {
         } detail: {
             DetailView(viewModel: viewModel)
         }
+        // Text with no style of its own (message bubbles, sidebar rows)
+        // follows the Text Size setting too.
+        .scaledFont(.body)
         .navigationTitle("Weft")
         .tint(WeftStyle.accent)
         .toolbar {
@@ -108,8 +111,8 @@ struct FirstSortView: View {
         let total = viewModel.messages.count
         VStack(alignment: .leading, spacing: 14) {
             Label(viewModel.topics.isEmpty ? "Sort this conversation?" : "Use this AI for this conversation?", systemImage: "square.stack.3d.up")
-                .font(.title2.bold())
-            Text(ContactNames.shared.display(chat.participants)).font(.headline)
+                .scaledFont(.title2, weight: .bold)
+            Text(ContactNames.shared.display(chat.participants)).scaledFont(.headline)
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
                 GridRow {
                     Text("AI").foregroundStyle(.secondary)
@@ -129,7 +132,7 @@ struct FirstSortView: View {
                 }
             }
             Text("New messages are sorted automatically. Older history is also processed when enabled (Settings → Sorting, or right-click the conversation → Skip Older History).")
-                .font(.caption)
+                .scaledFont(.caption)
                 .foregroundStyle(.secondary)
             HStack {
                 Button("Choose a Different AI…") {
@@ -179,18 +182,18 @@ struct QueueButton: View {
             .help("What Weft is working on")
             .popover(isPresented: $showing, arrowEdge: .bottom) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Activity").font(.headline)
+                    Text("Activity").scaledFont(.headline)
                     ForEach(items) { item in
                         HStack(alignment: .top, spacing: 8) {
                             Image(systemName: item.symbol).foregroundStyle(WeftStyle.accent).frame(width: 18)
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(item.conversation).font(.callout.weight(.medium))
-                                Text(item.status).font(.caption).foregroundStyle(.secondary)
+                                Text(item.conversation).scaledFont(.callout, weight: .medium)
+                                Text(item.status).scaledFont(.caption).foregroundStyle(.secondary)
                             }
                         }
                     }
                     Text("Right-click a conversation to pause its sorting, or Skip Older History so only new messages are sorted.")
-                        .font(.caption2)
+                        .scaledFont(.caption2)
                         .foregroundStyle(.secondary)
                 }
                 .padding(14)

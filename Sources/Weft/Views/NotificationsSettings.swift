@@ -40,7 +40,7 @@ struct NotificationOptions: View {
         Toggle("Hide message text in notifications", isOn: $settings.notifyHidePreviews)
             .disabled(!settings.notifyBanners)
         Text("Notifications and follow-up reminders show message text, and macOS can show them on the lock screen. Turn this on to show only “New message” / “Follow-up reminder”, or choose “Show previews: When Unlocked” in Weft's notification settings.")
-            .font(.caption)
+            .scaledFont(.caption)
             .foregroundStyle(.secondary)
         Toggle("Show the number of new messages on Weft's Dock icon", isOn: $settings.dockBadge)
         HStack {
@@ -49,11 +49,11 @@ struct NotificationOptions: View {
             }
             .disabled(!settings.notifyBanners)
             if let testResult {
-                Text(testResult).font(.caption).foregroundStyle(.secondary)
+                Text(testResult).scaledFont(.caption).foregroundStyle(.secondary)
             }
         }
         Text("How notifications look (banners, alerts, previews) is set in macOS. Messages also sends its own notifications — if you'd rather have only Weft's, turn off Messages' notifications there.")
-            .font(.caption)
+            .scaledFont(.caption)
             .foregroundStyle(.secondary)
         HStack {
             Button("Open Weft's notification settings") {
@@ -78,7 +78,7 @@ struct NotificationSetupView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Label("Notifications", systemImage: "bell.badge")
-                .font(.title2.bold())
+                .scaledFont(.title2, weight: .bold)
             Text("Choose how Weft tells you about new messages. You can change this any time in Settings.")
                 .foregroundStyle(.secondary)
             Form { NotificationOptions(settings: settings) }
