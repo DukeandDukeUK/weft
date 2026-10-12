@@ -6,22 +6,27 @@ If you text an AI assistant (or your boss, or the family group) about everything
 
 ![Weft showing a conversation sorted into topics](docs/screenshot-light.png)
 
+### Works with AI assistants you text
+
+Weft sorts any conversation in Messages, so it works with AI assistants you talk to through iMessage or regular texts, such as **[Instinct](https://instinct.com)**, **[Poke](https://poke.com)**, **[Anuma](https://www.anuma.ai)** and **[Folk](https://www.folk.com)**. Add the assistant's conversation with **+** and Weft sorts it like any other. Weft isn't affiliated with any of them.
+
 - **Topics, sorted automatically.** New messages are filed into the right topic a few seconds after they arrive, or a new topic is started. When a conversation comes back to an earlier subject, it lands in that same topic.
 - **Your whole history.** After the first sort, Weft keeps sorting the older part of a long conversation in the background (you can turn this off in Settings).
 - **Several conversations.** Add as many as you like with **+**, drag them into your own order, and right-click to remove one. All of them stay sorted in the background; a dot shows which have new messages.
 - **Group chats.** Each message shows who sent it, and the sorting knows who said what. Replies go to the whole group — including groups with Android members, sent as regular texts through your iPhone (turn on Text Message Forwarding).
 - **Reply inside a topic.** Your reply is sent through Messages as you, and Weft shows who it goes to. It starts with "Re: <topic> —", so other participants know which subject you mean (you can turn this off).
 - **Follow-ups.** Weft keeps a list of requests that haven't been answered yet and promises that haven't been kept, and checks them off when they're done.
-- **Fix topics by hand.** Right-click to rename or merge topics, move a message to another topic, or split a topic — with Undo (⌘Z).
+- **Fix topics by hand.** Right-click a topic to rename, merge or remove it (its messages are sorted again), or right-click a message to move it to another topic or split a topic — with Undo (⌘Z). Topics you make by hand get a summary too.
 - **Follow-up owners, due dates and reminders.** Follow-ups are split into *Owed by me* and *Waiting on them*, can have a due date or be snoozed, and Weft reminds you with a notification. Each links back to the message it came from.
 - **Per-conversation controls.** Right-click a conversation to pause its sorting or keep it to recent messages only; the Activity button shows what Weft is working on.
 - **Search** one conversation or all of them, and search the conversation picker by name, number or message.
 - **Photos and files** show in the conversation (click to open). Right-click → **Open in Messages**.
+- **Links** show as preview cards like in Messages (image, title and site) and open with a click. Weft uses the preview Messages already saved, so it never contacts the website itself.
 - **Reactions** (❤️ 👍 ✅ …) show on messages just like in Messages, including several people's in a group — click them to see who reacted.
 - **Contact names** next to phone numbers, if you allow Contacts access.
 - **Notifications.** A red count on Weft's Dock icon and next to each conversation, plus optional notifications with a sound you pick. Clicking one opens that conversation.
 - **Automatic updates.** Weft checks for new versions and offers to install them (Weft → Check for Updates…).
-- **Light, Dark or Automatic** appearance (Settings → Appearance).
+- **Light, Dark or Automatic** appearance, and a **Text size** from Small to Largest (Settings → Appearance, or View → Bigger Text ⌘+ / Smaller Text ⌘−).
 
 Weft never changes your Messages history. It only reads it, and sends a message when you press Send.
 
