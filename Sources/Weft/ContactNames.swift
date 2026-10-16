@@ -14,12 +14,29 @@ final class ContactNames {
     /// Contact photo thumbnails, same keys as `names`.
     private(set) var photos: [String: Data] = [:]
     private var loaded = false
+    private var watching = false
+    /// Kept alive so macOS keeps sending change notices to this app.
+    private let store = CNContactStore()
 
-    /// Ask for access (first time only) and load the address book.
+    /// Ask for access (first time only) and load the address book. Contacts
+    /// added or edited later are picked up as soon as macOS reports the change.
     func load() async {
         guard !loaded else { return }
         loaded = true
-        let store = CNContactStore()
+        watchForChanges()
+        await reload()
+    }
+
+    private func watchForChanges() {
+        guard !watching else { return }
+        watching = true
+        NotificationCenter.default.addObserver(forName: .CNContactStoreDidChange, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in await self?.reload() }
+        }
+    }
+
+    private func reload() async {
+        let store = self.store
         let status = CNContactStore.authorizationStatus(for: .contacts)
         if status == .notDetermined {
             let granted = (try? await store.requestAccess(for: .contacts)) ?? false
