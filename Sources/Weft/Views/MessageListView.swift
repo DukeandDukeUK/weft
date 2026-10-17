@@ -91,8 +91,14 @@ struct MessageListView: View {
             }
             Button("Cancel", role: .cancel) { newTopicFor = nil }
         }
-        // A fresh scroll view per thread, so each one opens at the bottom.
-        .id(viewModel.sidebarSelection)
+        // A fresh scroll view per thread AND per loaded conversation, so each
+        // one opens at the bottom with its messages already in place. Jumping
+        // to the bottom after a long conversation's messages arrive in an
+        // existing view used estimated row heights and could land on an empty
+        // stretch (blank until something new was sent). New messages are
+        // added at the end, so the oldest one only changes when a different
+        // set of messages is loaded.
+        .id(ListIdentity(selection: viewModel.sidebarSelection, oldest: viewModel.visibleMessages.first?.id))
     }
 
     private static let bottomID = "bottom-marker"
@@ -134,10 +140,14 @@ struct MessageListView: View {
     private func scrollToBottom(_ proxy: ScrollViewProxy, lastID: Int64?, animated: Bool) {
         guard lastID != nil else { return }
         atBottom = true
-        // Scroll once layout has run, then again on the next pass: the first
-        // jump uses estimated heights for rows that haven't been measured yet.
+        // First jump to the newest MESSAGE: the list builds the row it's asked
+        // for, so this lands on real content even when the rows above it
+        // haven't been measured yet. (Jumping straight to the marker below
+        // the list used estimated heights and could land on an empty stretch,
+        // so a long conversation opened blank.) Then, with the bottom rows
+        // built, settle on the marker so the padding below shows too.
         DispatchQueue.main.async {
-            proxy.scrollTo(Self.bottomID, anchor: .bottom)
+            proxy.scrollTo(lastID, anchor: .bottom)
             DispatchQueue.main.async {
                 proxy.scrollTo(Self.bottomID, anchor: .bottom)
             }
@@ -154,6 +164,11 @@ struct MessageListView: View {
             withAnimation { proxy.scrollTo(target, anchor: .center) }
         }
     }
+}
+
+private struct ListIdentity: Hashable {
+    let selection: SidebarSelection?
+    let oldest: Int64?
 }
 
 private struct ScrollSpot: Equatable {
