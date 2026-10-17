@@ -33,10 +33,11 @@ struct MessageListView: View {
                             senderLabel: viewModel.isGroupChat && !message.isFromMe
                                 && (index == 0 || visible[index - 1].handleId != message.handleId
                                     || visible[index - 1].isFromMe)
-                                ? message.senderName : nil
+                                ? message.senderName : nil,
+                            menuItems: { menuItems(for: message) }
                         )
                         .id(message.id)
-                        .contextMenu { messageMenu(message) }
+                        .contextMenu { MessageMenuContent(items: menuItems(for: message)) }
                     }
                 }
                 .padding(.horizontal, 20)
@@ -97,35 +98,37 @@ struct MessageListView: View {
     private static let bottomID = "bottom-marker"
 
     /// Right-click a message: move it, split the topic, copy, open in Messages.
-    @ViewBuilder
-    private func messageMenu(_ message: ChatMessage) -> some View {
+    private func menuItems(for message: ChatMessage) -> [MessageMenuItem] {
         let current = viewModel.topics.first { $0.messageIds.contains(message.id) }
-        Menu("Move to Topic") {
-            ForEach(viewModel.topics.filter { $0.id != current?.id }) { topic in
-                Button(topic.title) {
+        var items: [MessageMenuItem] = [
+            MessageMenuItem(title: "Move to Topic", children: viewModel.topics.filter { $0.id != current?.id }.map { topic in
+                MessageMenuItem(title: topic.title) {
                     viewModel.editTopics("Move Message", undoManager: undoManager) {
                         TopicEditor.move($0, messages: [message.id], to: topic.id)
                     }
                 }
-            }
-        }
-        Button("Move to New Topic…") {
-            newTopicName = ""
-            newTopicFor = message.id
-        }
+            }),
+            MessageMenuItem(title: "Move to New Topic…") {
+                newTopicName = ""
+                newTopicFor = message.id
+            },
+        ]
         if let topic = viewModel.selectedTopic, topic.messageIds.first != message.id {
-            Button("Split Topic Here") {
+            items.append(MessageMenuItem(title: "Split Topic Here") {
                 viewModel.editTopics("Split Topic", undoManager: undoManager) {
                     TopicEditor.split($0, topic.id, from: message.id, newTitle: topic.title + " (continued)").topics
                 }
-            }
+            })
         }
-        Divider()
-        Button("Open in Messages") { viewModel.openInMessages() }
-        Button("Copy Text") {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(message.text, forType: .string)
-        }
+        items += [
+            .divider,
+            MessageMenuItem(title: "Open in Messages") { viewModel.openInMessages() },
+            MessageMenuItem(title: "Copy Whole Message") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(message.text, forType: .string)
+            },
+        ]
+        return items
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, lastID: Int64?, animated: Bool) {
@@ -164,6 +167,8 @@ struct MessageRow: View {
     let message: ChatMessage
     /// Group chats: who sent it (shown when the sender changes).
     var senderLabel: String? = nil
+    /// Right-click menu, also shown when right-clicking the selectable text.
+    var menuItems: () -> [MessageMenuItem] = { [] }
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -189,12 +194,16 @@ struct MessageRow: View {
                     // repeat them.
                     if (message.attachments.isEmpty || message.text != "[attachment]")
                         && !(message.link.map { LinkText.isJustTheLink(message.text, $0.url) } ?? false) {
-                        // Not selectable: selectable text takes the right-click
-                        // for macOS's own text menu, hiding Weft's (Move to
-                        // Topic…). The menu has Copy Text instead.
-                        Text(LinkText.attributed(message.text))
-                            // Links in your (indigo) bubbles stay white, underlined.
-                            .tint(message.isFromMe ? Color.white : WeftStyle.accent)
+                        // Selectable (drag to pick part of it), with Weft's menu
+                        // on right-click. Solid black/white in their bubbles:
+                        // macOS's normal text color is slightly see-through and
+                        // loses contrast on gray.
+                        SelectableText(
+                            text: LinkText.attributed(message.text),
+                            color: message.isFromMe ? .white : NSColor(WeftStyle.theirText),
+                            fontSize: TextScale.baseSize(.body) * AppSettings.shared.textScale,
+                            menuItems: menuItems
+                        )
                             .padding(.horizontal, 14)
                             .padding(.vertical, 9)
                             .background(message.isFromMe ? WeftStyle.myBubble : WeftStyle.theirBubble,
