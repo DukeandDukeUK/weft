@@ -7,6 +7,7 @@ import SwiftUI
 struct ComposeView: View {
     @Bindable var viewModel: WeftViewModel
     @Environment(\.conversationPalette) private var palette
+    @FocusState private var typing: Bool
 
     private var draft: Binding<String> {
         Binding(get: { viewModel.currentDraft }, set: { viewModel.currentDraft = $0 })
@@ -49,8 +50,24 @@ struct ComposeView: View {
                 .scaledFont(.body)
                 .lineLimit(1...6)
                 .onSubmit(send)
+                .focused($typing)
                 .padding(.vertical, 8)
                 .accessibilityLabel(recipientLine.map { String(localized: "Message, \($0)") } ?? String(localized: "Message"))
+                // Emoji, like the smiley in Messages: opens the Mac's emoji
+                // picker, which types into the reply box.
+                Button {
+                    typing = true
+                    DispatchQueue.main.async { NSApp.orderFrontCharacterPalette(nil) }
+                } label: {
+                    Image(systemName: "face.smiling")
+                        .scaledFont(.title3)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(String(localized: "Emoji & Symbols"))
+                .accessibilityLabel(String(localized: "Emoji & Symbols"))
                 Button(action: send) {
                     Image(systemName: "arrow.up")
                         .scaledFont(.body, weight: .bold)
