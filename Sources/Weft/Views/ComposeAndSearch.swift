@@ -6,6 +6,7 @@ import SwiftUI
 /// Sending goes out through the Messages app as you.
 struct ComposeView: View {
     @Bindable var viewModel: WeftViewModel
+    @Environment(\.conversationPalette) private var palette
 
     private var draft: Binding<String> {
         Binding(get: { viewModel.currentDraft }, set: { viewModel.currentDraft = $0 })
@@ -21,9 +22,9 @@ struct ComposeView: View {
         let names = ContactNames.shared.shortDisplay(chat.participants)
         if viewModel.isGroupChat {
             let count = chat.participants.split(separator: ",").count
-            return "To the group: \(names) (\(count) people)"
+            return String(localized: "To the group: \(names) (\(count) people)")
         }
-        return "To: \(ContactNames.shared.display(chat.participants))"
+        return String(localized: "To: \(ContactNames.shared.display(chat.participants))")
     }
 
     var body: some View {
@@ -39,8 +40,8 @@ struct ComposeView: View {
                 // Grows up to 6 lines as you type; Enter sends, Option-Return
                 // adds a new line (the standard Mac text-field behaviour).
                 TextField(
-                    viewModel.selectedTopic.map { "Reply in “\($0.title)”" }
-                        ?? (viewModel.isGroupChat ? "Message the group" : "Message"),
+                    viewModel.selectedTopic.map { String(localized: "Reply in “\($0.title)”") }
+                        ?? (viewModel.isGroupChat ? String(localized: "Message the group") : String(localized: "Message")),
                     text: draft,
                     axis: .vertical
                 )
@@ -49,7 +50,7 @@ struct ComposeView: View {
                 .lineLimit(1...6)
                 .onSubmit(send)
                 .padding(.vertical, 8)
-                .accessibilityLabel(recipientLine.map { "Message, \($0)" } ?? "Message")
+                .accessibilityLabel(recipientLine.map { String(localized: "Message, \($0)") } ?? String(localized: "Message"))
                 Button(action: send) {
                     Image(systemName: "arrow.up")
                         .scaledFont(.body, weight: .bold)
@@ -64,11 +65,11 @@ struct ComposeView: View {
             .padding(.leading, 16)
             .padding(.trailing, 6)
             .padding(.vertical, 4)
-            .glassSurface(RoundedRectangle(cornerRadius: 22, style: .continuous), tint: WeftStyle.accent.opacity(0.08), interactive: true)
+            .glassSurface(RoundedRectangle(cornerRadius: 22, style: .continuous), tint: palette.tint.opacity(0.10), interactive: true)
         }
         .help(viewModel.canSend
-            ? "Enter to send, Option-Return for a new line"
-            : "This conversation can't be replied to from Weft")
+            ? String(localized: "Enter to send, Option-Return for a new line")
+            : String(localized: "This conversation can't be replied to from Weft"))
     }
 
     private func send() {
@@ -166,7 +167,7 @@ struct SearchResultsView: View {
     }
 
     private func name(_ chat: Int64) -> String {
-        viewModel.chats.first { $0.id == chat }.map { ContactNames.shared.shortDisplay($0.participants) } ?? "Conversation"
+        viewModel.chats.first { $0.id == chat }.map { ContactNames.shared.shortDisplay($0.participants) } ?? String(localized: "Conversation")
     }
 
     private func row(_ message: ChatMessage, conversation: String?, topic: String?) -> some View {
@@ -175,7 +176,7 @@ struct SearchResultsView: View {
                 if let conversation {
                     Text(conversation).scaledFont(.caption).bold().foregroundStyle(WeftStyle.accent)
                 }
-                Text(message.speaker).scaledFont(.caption).bold().foregroundStyle(.secondary)
+                Text(message.displaySpeaker).scaledFont(.caption).bold().foregroundStyle(.secondary)
                 Spacer()
                 if let topic {
                     Text(topic).scaledFont(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -287,7 +288,10 @@ struct LoopDetailView: View {
                             Button("Unsnooze") { viewModel.updateLoop(loop.id) { $0.snoozedUntil = nil } }
                         }
                     } label: {
-                        Label(loop.isSnoozed() ? "Snoozed until \(loop.snoozedUntil!.formatted(date: .abbreviated, time: .shortened))" : "Snooze", systemImage: "moon.zzz")
+                        Label(loop.isSnoozed()
+                                ? String(localized: "Snoozed until \(loop.snoozedUntil!.formatted(date: .abbreviated, time: .shortened))")
+                                : String(localized: "Snooze"),
+                              systemImage: "moon.zzz")
                     }
                     .fixedSize()
                 }
@@ -302,9 +306,9 @@ struct LoopDetailView: View {
 
     private func statusLabel(_ status: LoopStatus) -> String {
         switch status {
-        case .open: return "Open"
-        case .resolved: return "Resolved"
-        case .dismissed: return "Dismissed"
+        case .open: return String(localized: "Open", comment: "Follow-up status")
+        case .resolved: return String(localized: "Resolved", comment: "Follow-up status")
+        case .dismissed: return String(localized: "Dismissed", comment: "Follow-up status")
         }
     }
 }

@@ -50,6 +50,15 @@ cp "$BIN" "$APP_DIR/Contents/MacOS/$EXEC_NAME"
 # Drop debugging info (it lists build folders); the app doesn't need it.
 strip -S -x "$APP_DIR/Contents/MacOS/$EXEC_NAME"
 
+# Localizations. SwiftPM compiles the string catalog into a resource bundle;
+# the app looks strings up in its own bundle, so the .lproj folders move
+# into Contents/Resources. (Without them every string falls back to its
+# English key, so a missing bundle only ever costs translations.)
+RESOURCE_BUNDLE="$BIN_DIR/Weft_Weft.bundle"
+if [ -d "$RESOURCE_BUNDLE" ]; then
+    find "$RESOURCE_BUNDLE" -maxdepth 2 -name "*.lproj" -type d -exec cp -R {} "$APP_DIR/Contents/Resources/" \;
+fi
+
 # Sparkle (automatic updates). ditto keeps the framework's internal symlinks.
 mkdir -p "$APP_DIR/Contents/Frameworks"
 ditto "$BIN_DIR/Sparkle.framework" "$APP_DIR/Contents/Frameworks/Sparkle.framework"
@@ -75,6 +84,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<EOF
     <string>$APP_NAME</string>
     <key>CFBundleDisplayName</key>
     <string>$APP_NAME</string>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundlePackageType</key>

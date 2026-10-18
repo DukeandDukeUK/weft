@@ -23,10 +23,17 @@ struct ChatMessage: Identifiable, Sendable, Hashable {
     var link: LinkPreview? = nil
 
     /// Label used in transcripts sent to the AI: "You", the sender's name
-    /// (group chats, known contacts), or "Them".
+    /// (group chats, known contacts), or "Them". Always English: the
+    /// sorting instructions refer to "You" by that word.
     var speaker: String {
         if isFromMe { return "You" }
         return senderName.isEmpty ? "Them" : senderName
+    }
+
+    /// The same, in the app's language, for showing on screen.
+    var displaySpeaker: String {
+        if isFromMe { return String(localized: "You", comment: "The person using Weft") }
+        return senderName.isEmpty ? String(localized: "Them", comment: "The other side of a conversation") : senderName
     }
 
     /// iMessage stores `message.date` as INTEGER nanoseconds since the Cocoa
@@ -182,7 +189,7 @@ enum LoopOwner: String, Codable, Sendable, CaseIterable {
     /// Someone asked you, or you promised something.
     case me
 
-    var label: String { self == .them ? "Waiting on them" : "Owed by me" }
+    var label: String { self == .them ? String(localized: "Waiting on them") : String(localized: "Owed by me") }
 
     /// AI replies: "me" / "them" (anything else → nil).
     static func parse(_ s: String?) -> LoopOwner? { s.flatMap { LoopOwner(rawValue: $0.lowercased()) } }

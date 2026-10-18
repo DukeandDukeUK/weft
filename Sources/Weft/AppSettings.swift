@@ -43,6 +43,18 @@ final class AppSettings {
 
     func lastViewedRowID(chat: Int64) -> Int64 { lastViewed[String(chat)] ?? 0 }
 
+    /// Colours you chose per conversation (index into ConversationColors.all).
+    /// Conversations not listed get their automatic colour.
+    private(set) var conversationHues: [String: Int]
+
+    func hueIndex(forChat chat: Int64) -> Int? { conversationHues[String(chat)] }
+
+    /// Nil = back to the automatic colour.
+    func setHueIndex(_ index: Int?, forChat chat: Int64) {
+        conversationHues[String(chat)] = index
+        defaults.set(conversationHues, forKey: Keys.conversationHues)
+    }
+
     /// Banner + sound when a new message arrives.
     var notifyBanners: Bool { didSet { defaults.set(notifyBanners, forKey: Keys.notifyBanners) } }
     /// "default", "none", or a Mac alert sound name (e.g. "Glass").
@@ -95,6 +107,7 @@ final class AppSettings {
         defaults.set(consents, forKey: Keys.consents)
         pausedChats.remove(chat)
         recentOnlyChats.remove(chat)
+        setHueIndex(nil, forChat: chat)
     }
 
     func migrateLegacyConsentOnce() {
@@ -155,6 +168,7 @@ final class AppSettings {
         static let sortOlderHistory = "weft.sortOlderHistory"
         static let notifOnboarded = "weft.notificationsOnboarded"
         static let lastViewed = "weft.lastViewed"
+        static let conversationHues = "weft.conversationHues"
     }
 
     private init() {
@@ -175,6 +189,7 @@ final class AppSettings {
         if followed.isEmpty, let only = d.string(forKey: Keys.chatRowID).flatMap(Int64.init) { followed = [only] }
         self.followedChats = followed
         self.lastViewed = (d.dictionary(forKey: Keys.lastViewed) as? [String: Int64]) ?? [:]
+        self.conversationHues = (d.dictionary(forKey: Keys.conversationHues) as? [String: Int]) ?? [:]
         self.notifyBanners = d.object(forKey: Keys.notifyBanners) as? Bool ?? true
         self.notifySound = d.string(forKey: Keys.notifySound) ?? "default"
         self.dockBadge = d.object(forKey: Keys.dockBadge) as? Bool ?? true

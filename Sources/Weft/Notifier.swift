@@ -56,9 +56,15 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let sender = newest.senderName.isEmpty ? conversationName : newest.senderName
         content.title = sender
         if sender != conversationName { content.subtitle = conversationName }
-        content.body = settings.notifyHidePreviews
-            ? (incoming.count == 1 ? "New message" : "\(incoming.count) new messages")
-            : (incoming.count == 1 ? newest.text : "\(newest.text)\n(+\(incoming.count - 1) more)")
+        if settings.notifyHidePreviews {
+            content.body = incoming.count == 1
+                ? String(localized: "New message")
+                : String(localized: "^[\(incoming.count) new message](inflect: true)")
+        } else {
+            content.body = incoming.count == 1
+                ? newest.text
+                : newest.text + "\n" + String(localized: "(+\(incoming.count - 1) more)", comment: "More new messages besides the one shown")
+        }
         content.sound = Self.sound(named: settings.notifySound)
         content.threadIdentifier = "chat-\(chat)"
         content.userInfo = ["chat": chat]
@@ -118,16 +124,16 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                 let content = UNMutableNotificationContent()
                 let isDue = loop.dueDate == when
                 if settings.notifyHidePreviews {
-                    content.title = isDue ? "A follow-up is due" : "Follow-up reminder"
+                    content.title = isDue ? String(localized: "A follow-up is due") : String(localized: "Follow-up reminder")
                     content.body = conversationName
                 } else {
-                    content.title = isDue ? "Due: \(loop.title)" : "Reminder: \(loop.title)"
+                    content.title = isDue ? String(localized: "Due: \(loop.title)") : String(localized: "Reminder: \(loop.title)")
                     content.subtitle = conversationName
                     content.body = loop.detail
                 }
                 content.sound = Self.sound(named: settings.notifySound)
                 content.userInfo = ["chat": chat, "loop": loop.id.uuidString]
-                let parts = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: when)
+                let parts = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: when)
                 requests.append(UNNotificationRequest(
                     identifier: prefix + loop.id.uuidString,
                     content: content,
@@ -148,16 +154,16 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// Settings → "Send test notification".
     func sendTest(settings: AppSettings) async -> String {
         guard await requestPermission() else {
-            return "macOS isn't allowing Weft's notifications. Turn them on in System Settings → Notifications → Weft."
+            return String(localized: "macOS isn't allowing Weft's notifications. Turn them on in System Settings → Notifications → Weft.")
         }
         let content = UNMutableNotificationContent()
         content.title = "Weft"
-        content.body = "This is how new messages will look."
+        content.body = String(localized: "This is how new messages will look.")
         content.sound = Self.sound(named: settings.notifySound)
         try? await center?.add(
             UNNotificationRequest(identifier: "weft-test-\(UUID())", content: content, trigger: nil)
         )
-        return "Sent — it should appear in a moment."
+        return String(localized: "Sent — it should appear in a moment.")
     }
 
     static func sound(named name: String) -> UNNotificationSound? {

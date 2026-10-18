@@ -34,6 +34,7 @@ struct MessageListView: View {
                                 && (index == 0 || visible[index - 1].handleId != message.handleId
                                     || visible[index - 1].isFromMe)
                                 ? message.senderName : nil,
+                            palette: viewModel.palette(for: message),
                             menuItems: { menuItems(for: message) }
                         )
                         .id(message.id)
@@ -107,29 +108,29 @@ struct MessageListView: View {
     private func menuItems(for message: ChatMessage) -> [MessageMenuItem] {
         let current = viewModel.topics.first { $0.messageIds.contains(message.id) }
         var items: [MessageMenuItem] = [
-            MessageMenuItem(title: "Move to Topic", children: viewModel.topics.filter { $0.id != current?.id }.map { topic in
+            MessageMenuItem(title: String(localized: "Move to Topic"), children: viewModel.topics.filter { $0.id != current?.id }.map { topic in
                 MessageMenuItem(title: topic.title) {
-                    viewModel.editTopics("Move Message", undoManager: undoManager) {
+                    viewModel.editTopics(String(localized: "Move Message", comment: "Undo menu"), undoManager: undoManager) {
                         TopicEditor.move($0, messages: [message.id], to: topic.id)
                     }
                 }
             }),
-            MessageMenuItem(title: "Move to New Topic…") {
+            MessageMenuItem(title: String(localized: "Move to New Topic…")) {
                 newTopicName = ""
                 newTopicFor = message.id
             },
         ]
         if let topic = viewModel.selectedTopic, topic.messageIds.first != message.id {
-            items.append(MessageMenuItem(title: "Split Topic Here") {
-                viewModel.editTopics("Split Topic", undoManager: undoManager) {
-                    TopicEditor.split($0, topic.id, from: message.id, newTitle: topic.title + " (continued)").topics
+            items.append(MessageMenuItem(title: String(localized: "Split Topic Here")) {
+                viewModel.editTopics(String(localized: "Split Topic", comment: "Undo menu"), undoManager: undoManager) {
+                    TopicEditor.split($0, topic.id, from: message.id, newTitle: String(localized: "\(topic.title) (continued)", comment: "Title of the second half of a split topic")).topics
                 }
             })
         }
         items += [
             .divider,
-            MessageMenuItem(title: "Open in Messages") { viewModel.openInMessages() },
-            MessageMenuItem(title: "Copy Whole Message") {
+            MessageMenuItem(title: String(localized: "Open in Messages")) { viewModel.openInMessages() },
+            MessageMenuItem(title: String(localized: "Copy Whole Message")) {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(message.text, forType: .string)
             },
@@ -182,6 +183,8 @@ struct MessageRow: View {
     let message: ChatMessage
     /// Group chats: who sent it (shown when the sender changes).
     var senderLabel: String? = nil
+    /// The conversation's colours (or, in a group, this person's).
+    var palette: ConversationPalette = ConversationColors.palette(index: 0)
     /// Right-click menu, also shown when right-clicking the selectable text.
     var menuItems: () -> [MessageMenuItem] = { [] }
 
@@ -198,8 +201,8 @@ struct MessageRow: View {
             VStack(alignment: message.isFromMe ? .trailing : .leading, spacing: 3) {
                 if let senderLabel, !senderLabel.isEmpty {
                     Text(senderLabel)
-                        .scaledFont(.caption, weight: .medium)
-                        .foregroundStyle(.secondary)
+                        .scaledFont(.caption, weight: .semibold)
+                        .foregroundStyle(palette.tint)
                         .padding(.leading, 12)
                 }
                 VStack(alignment: message.isFromMe ? .trailing : .leading, spacing: 4) {
@@ -221,7 +224,7 @@ struct MessageRow: View {
                         )
                             .padding(.horizontal, 14)
                             .padding(.vertical, 9)
-                            .background(message.isFromMe ? WeftStyle.myBubble : WeftStyle.theirBubble,
+                            .background(message.isFromMe ? WeftStyle.myBubble : palette.theirBubble,
                                         in: RoundedRectangle(cornerRadius: WeftStyle.bubbleRadius, style: .continuous))
                             // Solid black/white in their bubbles: macOS's normal text
                             // color is slightly see-through and loses contrast on gray.
@@ -271,7 +274,7 @@ struct ReactionBadge: View {
         // Click to see who reacted, like Messages.
         .onTapGesture { showWho = true }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Reactions: " + reactions.map { "\(Self.name(for: $0)) \($0.emoji)" }.joined(separator: ", "))
+        .accessibilityLabel(String(localized: "Reactions: \(reactions.map { "\(Self.name(for: $0)) \($0.emoji)" }.joined(separator: ", "))"))
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { showWho = true }
         .popover(isPresented: $showWho, arrowEdge: .top) {
@@ -292,8 +295,8 @@ struct ReactionBadge: View {
     }
 
     static func name(for r: Reaction) -> String {
-        if r.isFromMe { return "You" }
-        return ContactNames.shared.name(for: r.sender) ?? (r.sender.isEmpty ? "Them" : r.sender)
+        if r.isFromMe { return String(localized: "You", comment: "The person using Weft") }
+        return ContactNames.shared.name(for: r.sender) ?? (r.sender.isEmpty ? String(localized: "Them", comment: "The other side of a conversation") : r.sender)
     }
 }
 
@@ -302,6 +305,8 @@ struct Avatar: View {
     /// nil = you.
     let handle: String?
     var size: CGFloat = 28
+    /// Colour behind the initials; nil = Weft's own.
+    var tint: Color? = nil
 
     var body: some View {
         Group {
@@ -309,7 +314,8 @@ struct Avatar: View {
                 Image(nsImage: image).resizable().scaledToFill()
             } else {
                 ZStack {
-                    LinearGradient(colors: [WeftStyle.accent, WeftStyle.teal], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    LinearGradient(colors: tint.map { [$0, $0.opacity(0.75)] } ?? [WeftStyle.accent, WeftStyle.teal],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
                     Text(initials).font(.system(size: size * 0.4, weight: .semibold)).foregroundStyle(.white)
                 }
             }
@@ -319,7 +325,7 @@ struct Avatar: View {
     }
 
     private var initials: String {
-        guard let handle else { return "Me" }
+        guard let handle else { return String(localized: "Me", comment: "Initials shown for the person using Weft") }
         let name = ContactNames.shared.name(for: handle) ?? ""
         let letters = name.split(separator: " ").prefix(2).compactMap(\.first)
         if !letters.isEmpty { return String(letters).uppercased() }

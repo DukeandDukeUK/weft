@@ -67,11 +67,29 @@ enum TopicEditor {
         }.flatMap { topics[$0].messageIds.contains(where: ids.contains) ? $0 : nil }
     }
 
+    /// Where a message the AI skipped should go: the topic holding the
+    /// message nearest before it in time (or, at the very start of the
+    /// conversation, nearest after it). Nil when no topic holds anything.
+    static func neighborTopicIndex(for messageId: Int64, in topics: [Topic]) -> Int? {
+        var before: (id: Int64, index: Int)?
+        var after: (id: Int64, index: Int)?
+        for (index, topic) in topics.enumerated() {
+            for id in topic.messageIds where id != messageId {
+                if id < messageId {
+                    if before == nil || id > before!.id { before = (id, index) }
+                } else if after == nil || id < after!.id {
+                    after = (id, index)
+                }
+            }
+        }
+        return (before ?? after)?.index
+    }
+
     /// A new topic's title: the AI's, or (redirect case) the old topic's —
     /// never empty.
     static func title(_ proposed: String, fallback: String) -> String {
         let t = proposed.trimmingCharacters(in: .whitespacesAndNewlines)
-        return t.isEmpty ? (fallback.isEmpty ? "Untitled topic" : fallback) : t
+        return t.isEmpty ? (fallback.isEmpty ? String(localized: "Untitled topic") : fallback) : t
     }
 
     /// Undo/Redo without losing later work: go back to `target`, but keep

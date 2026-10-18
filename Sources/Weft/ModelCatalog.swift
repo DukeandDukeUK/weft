@@ -109,9 +109,9 @@ enum ModelCatalog {
         case .claude, .gemini:
             listed = (recommendations.entry(provider)?.models ?? []).map { Option(id: $0.id, label: $0.label) }
         case .codex:
-            listed = await Task.detached { codexModels() }.value
+            listed = (try? await BlockingWork.run { codexModels() }) ?? []
         case .grok:
-            listed = await Task.detached { grokModels() }.value
+            listed = (try? await BlockingWork.run { grokModels() }) ?? []
         case .ollama, .lmstudio:
             listed = (status?.localModels ?? []).map { Option(id: $0, label: $0) }
         }

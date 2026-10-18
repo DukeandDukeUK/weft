@@ -27,6 +27,9 @@ final class BackgroundSorter {
     var conversationName: (Int64) -> String = { _ in "Messages" }
     private var running = false
     private var pending: Task<Void, Never>?
+    /// How many passes each waiting message has been offered to the AI
+    /// without being placed (see WeftViewModel.maxFilingAttempts).
+    private var offered: [Int64: Int] = [:]
 
     /// Debounced: a burst of writes to Messages becomes one pass.
     private var debounceTask: Task<Void, Never>?
@@ -82,7 +85,11 @@ final class BackgroundSorter {
         for chat in settings.followedChats where chat != openChat() {
             // New-message count, and a banner for anything not yet announced.
             let viewed = settings.lastViewedRowID(chat: chat)
-            unreadCounts[chat] = (try? await reader.countIncoming(chatRowID: chat, after: viewed)) ?? 0
+            let count = (try? await reader.countIncoming(chatRowID: chat, after: viewed)) ?? 0
+            // Opened while counting? The open view owns its count now, and
+            // has already set it to zero.
+            guard chat != openChat() else { continue }
+            unreadCounts[chat] = count
             if (unreadCounts[chat] ?? 0) > 0,
                let recent = try? await reader.fetchMessages(chatRowID: chat, after: viewed, newest: 20) {
                 Notifier.shared.announce(recent.map(WeftViewModel.labeled), chat: chat,
@@ -141,6 +148,23 @@ final class BackgroundSorter {
             }
             filed.formUnion(a.messageIds)
         }
+        // Already in a topic (the cursor lagged behind): nothing to do.
+        filed.formUnion(fresh.map(\.id).filter(already.contains))
+        // Skipped again? After a few passes it joins the topic of the
+        // message before it, so the same batch isn't sent on every pass.
+        for m in fresh where !filed.contains(m.id) {
+            let count = (offered[m.id] ?? 0) + 1
+            offered[m.id] = count
+            guard count >= WeftViewModel.maxFilingAttempts else { continue }
+            if let target = TopicEditor.neighborTopicIndex(for: m.id, in: topics) {
+                topics[target].messageIds.append(m.id)
+                topics[target].messageIds.sort()
+            } else {
+                topics.append(Topic(id: UUID(), title: TopicEditor.title("", fallback: ""), summary: "", messageIds: [m.id]))
+            }
+            filed.insert(m.id)
+        }
+        for id in filed { offered[id] = nil }
         topics.sort { ($0.messageIds.max() ?? 0) > ($1.messageIds.max() ?? 0) }
 
         var loops = saved.loops
@@ -156,11 +180,15 @@ final class BackgroundSorter {
         saved.loops = loops
         saved.generatedAt = Date()
         // Advance only past what was filed, so skipped messages get retried.
-        let freshIDs = fresh.map(\.id)
-        if let firstUnfiled = freshIDs.first(where: { !filed.contains($0) }) {
-            saved.newestRowId = freshIDs.filter { $0 < firstUnfiled }.max() ?? saved.newestRowId
+        // Judged against everything waiting, not just this batch: a message
+        // delivered late (higher ROWID, earlier date) can sit outside a
+        // date-ordered batch with a ROWID below the batch's newest, and
+        // must not be jumped over.
+        let waitingIDs = waiting.map(\.id)
+        if let firstUnfiled = waitingIDs.filter({ !filed.contains($0) }).min() {
+            saved.newestRowId = max(saved.newestRowId, firstUnfiled - 1)
         } else {
-            saved.newestRowId = freshIDs.max() ?? saved.newestRowId
+            saved.newestRowId = max(saved.newestRowId, waitingIDs.max() ?? saved.newestRowId)
         }
         // Opened while we were working? The open view owns it now.
         // Removed meanwhile? Then nothing is saved and no reminders return.

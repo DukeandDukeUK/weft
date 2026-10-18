@@ -4,6 +4,9 @@ import PackageDescription
 
 let package = Package(
     name: "Weft",
+    // English is the development language; Sources/Weft/Resources holds the
+    // string catalog every piece of text on screen comes from.
+    defaultLocalization: "en",
     platforms: [
         .macOS(.v15)
     ],
@@ -19,6 +22,7 @@ let package = Package(
             name: "Weft",
             dependencies: [.product(name: "Sparkle", package: "Sparkle")],
             path: "Sources/Weft",
+            resources: [.process("Resources")],
             linkerSettings: [
                 // Sparkle.framework ships inside Weft.app/Contents/Frameworks.
                 .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])

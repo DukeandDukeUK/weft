@@ -17,11 +17,11 @@ struct MessageSender: Sendable {
         var errorDescription: String? {
             switch self {
             case .automationDenied:
-                return "macOS blocked the send: Automation permission is not granted. Open System Settings > Privacy & Security > Automation and allow Weft to control Messages."
+                return String(localized: "macOS blocked the send: Automation permission is not granted. Open System Settings > Privacy & Security > Automation and allow Weft to control Messages.")
             case .launchFailed(let why):
-                return "Could not launch the send helper: \(why)"
+                return String(localized: "Could not launch the send helper: \(why)")
             case .failed(let code, let message):
-                return "Send failed (exit \(code)): \(message)"
+                return String(localized: "Send failed (exit \(Int(code))): \(message)")
             }
         }
     }
@@ -98,17 +98,20 @@ struct MessageSender: Sendable {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript", isDirectory: false)
         proc.arguments = ["-e", script]
-        let outPipe = Pipe()
+        // Only the error text is used. Read it to the end BEFORE waiting for
+        // exit: reading afterwards would deadlock if the output ever
+        // outgrew the pipe. Nothing reads stdout, so it goes nowhere rather
+        // than into a pipe that could fill up.
         let errPipe = Pipe()
-        proc.standardOutput = outPipe
+        proc.standardOutput = FileHandle.nullDevice
         proc.standardError = errPipe
         do {
             try proc.run()
         } catch {
             throw SendError.launchFailed(error.localizedDescription)
         }
-        proc.waitUntilExit()
         let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+        proc.waitUntilExit()
         let errText = String(data: errData, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return (proc.terminationStatus, errText)

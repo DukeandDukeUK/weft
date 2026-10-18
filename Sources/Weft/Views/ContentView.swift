@@ -13,6 +13,7 @@ struct ContentView: View {
         // Text with no style of its own (message bubbles, sidebar rows)
         // follows the Text Size setting too.
         .scaledFont(.body)
+        .environment(\.conversationPalette, viewModel.palette)
         .navigationTitle("Weft")
         .tint(WeftStyle.accent)
         .toolbar {
@@ -110,25 +111,26 @@ struct FirstSortView: View {
         let firstPart = TopicSegmenter.buildTranscript(messages: viewModel.messages, maxTotalChars: limit).messages.count
         let total = viewModel.messages.count
         VStack(alignment: .leading, spacing: 14) {
-            Label(viewModel.topics.isEmpty ? "Sort this conversation?" : "Use this AI for this conversation?", systemImage: "square.stack.3d.up")
+            Label(viewModel.topics.isEmpty ? String(localized: "Sort this conversation?") : String(localized: "Use this AI for this conversation?"),
+                  systemImage: "square.stack.3d.up")
                 .scaledFont(.title2, weight: .bold)
             Text(ContactNames.shared.display(chat.participants)).scaledFont(.headline)
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
                 GridRow {
                     Text("AI").foregroundStyle(.secondary)
-                    Text(provider.map { "\($0.displayName) — \(settings.effectiveModel(for: $0).isEmpty ? "default model" : settings.effectiveModel(for: $0))" } ?? "None chosen")
+                    Text(provider.map { p -> String in
+                        let model = settings.effectiveModel(for: p)
+                        return "\(p.displayName) — \(model.isEmpty ? String(localized: "default model") : model)"
+                    } ?? String(localized: "None chosen"))
                 }
                 GridRow {
                     Text("Goes to").foregroundStyle(.secondary)
-                    Text(local ? "Nowhere — processed on this Mac" : (provider.map(Self.vendor) ?? "—"))
+                    Text(local ? String(localized: "Nowhere — processed on this Mac") : (provider.map(Self.vendor) ?? "—"))
                 }
                 GridRow {
                     Text("How much").foregroundStyle(.secondary)
-                    Text(!viewModel.topics.isEmpty
-                         ? "New messages as they arrive" + (settings.sortOlderHistory ? ", plus any older history not yet sorted" : "")
-                         : (firstPart >= total
-                            ? "All \(total) messages"
-                            : "The newest \(firstPart) of \(total) messages" + (settings.sortOlderHistory ? ", then the older ones in the background" : "")))
+                    Text(Self.howMuch(sortedAlready: !viewModel.topics.isEmpty, olderHistory: settings.sortOlderHistory,
+                                      firstPart: firstPart, total: total))
                 }
             }
             Text("New messages are sorted automatically. Older history is also processed when enabled (Settings → Sorting, or right-click the conversation → Skip Older History).")
@@ -155,12 +157,25 @@ struct FirstSortView: View {
 
     static func vendor(_ p: Provider) -> String {
         switch p {
-        case .claude: return "Anthropic (Claude)"
-        case .codex: return "OpenAI (ChatGPT)"
-        case .gemini: return "Google (Gemini)"
-        case .grok: return "xAI (Grok)"
-        case .ollama, .lmstudio: return "this Mac"
+        case .claude: return String(localized: "Anthropic (Claude)")
+        case .codex: return String(localized: "OpenAI (ChatGPT)")
+        case .gemini: return String(localized: "Google (Gemini)")
+        case .grok: return String(localized: "xAI (Grok)")
+        case .ollama, .lmstudio: return String(localized: "this Mac")
         }
+    }
+
+    /// "How much" of the conversation goes to the AI.
+    static func howMuch(sortedAlready: Bool, olderHistory: Bool, firstPart: Int, total: Int) -> String {
+        if sortedAlready {
+            return olderHistory
+                ? String(localized: "New messages as they arrive, plus any older history not yet sorted")
+                : String(localized: "New messages as they arrive")
+        }
+        if firstPart >= total { return String(localized: "All ^[\(total) messages](inflect: true)") }
+        return olderHistory
+            ? String(localized: "The newest \(firstPart) of \(total) messages, then the older ones in the background")
+            : String(localized: "The newest \(firstPart) of \(total) messages")
     }
 }
 

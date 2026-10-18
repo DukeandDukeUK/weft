@@ -7,7 +7,11 @@ import SwiftUI
 /// which multiplies the Mac's standard size by the chosen step.
 enum TextScale {
     static let steps: [(scale: Double, label: String)] = [
-        (0.85, "Small"), (1.0, "Default"), (1.15, "Large"), (1.3, "Extra Large"), (1.5, "Largest"),
+        (0.85, String(localized: "Small", comment: "Text size")),
+        (1.0, String(localized: "Default", comment: "Text size")),
+        (1.15, String(localized: "Large", comment: "Text size")),
+        (1.3, String(localized: "Extra Large", comment: "Text size")),
+        (1.5, String(localized: "Largest", comment: "Text size")),
     ]
 
     static func nearest(_ value: Double) -> Double {

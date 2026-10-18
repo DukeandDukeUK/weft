@@ -5,6 +5,7 @@ import SwiftUI
 /// Center pane: notice banner, then search results / loop detail / messages.
 struct DetailView: View {
     @Bindable var viewModel: WeftViewModel
+    @Environment(\.conversationPalette) private var palette
 
     private var isSearching: Bool {
         !viewModel.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -62,10 +63,9 @@ struct DetailView: View {
             }
         }
         .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            LinearGradient(colors: [WeftStyle.canvasTop, WeftStyle.canvasBottom], startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
-        )
+        // The conversation's own hue, faintly, so each one has its own air.
+        .background(palette.canvas.ignoresSafeArea())
+        .animation(.easeInOut(duration: 0.25), value: palette.hueIndex)
     }
 
     @ViewBuilder
@@ -129,14 +129,14 @@ struct StaleBanner: View {
         HStack(spacing: 8) {
             if failed {
                 Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
-                Text("Couldn't sort \(count) new message\(count == 1 ? "" : "s") — will retry with the next one.")
+                Text("Couldn't sort ^[\(count) new message](inflect: true) — will retry with the next one.")
                     .scaledFont(.callout)
                 Button("Retry", action: onReanalyze)
                     .glassButton()
                     .controlSize(.small)
             } else {
                 ProgressView().controlSize(.small)
-                Text("Sorting \(count) new message\(count == 1 ? "" : "s") into topics…")
+                Text("Sorting ^[\(count) new message](inflect: true) into topics…")
                     .scaledFont(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -156,7 +156,7 @@ struct PausedBanner: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "pause.circle").foregroundStyle(.secondary)
-            Text(count == 0 ? "Sorting is paused for this conversation." : "Sorting paused — \(count) new message\(count == 1 ? "" : "s") waiting.")
+            label
                 .scaledFont(.callout)
                 .foregroundStyle(.secondary)
             Button("Resume", action: onResume)
@@ -166,6 +166,12 @@ struct PausedBanner: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 7)
         .glassSurface(Capsule())
+    }
+
+    private var label: Text {
+        count == 0
+            ? Text("Sorting is paused for this conversation.")
+            : Text("Sorting paused — ^[\(count) new message](inflect: true) waiting.")
     }
 }
 
@@ -302,6 +308,7 @@ struct MissingDBView: View {
 struct ThreadHeader: View {
     let topic: Topic
     let onAll: () -> Void
+    @Environment(\.conversationPalette) private var palette
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -327,6 +334,6 @@ struct ThreadHeader: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .glassSurface(RoundedRectangle(cornerRadius: 22, style: .continuous), tint: WeftStyle.accent.opacity(0.12))
+        .glassSurface(RoundedRectangle(cornerRadius: 22, style: .continuous), tint: palette.tint.opacity(0.14))
     }
 }
