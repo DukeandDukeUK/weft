@@ -15,7 +15,7 @@ struct SettingsView: View {
             Section("Conversation") {
                 LabeledContent("Conversation") {
                     Text(viewModel.settings.selectedHandleId.isEmpty
-                        ? "None chosen"
+                        ? String(localized: "None chosen")
                         : ContactNames.shared.display(viewModel.settings.selectedHandleId))
                     .lineLimit(1)
                 }
@@ -62,14 +62,14 @@ struct SettingsView: View {
 
             Section("Permissions") {
                 permissionRow(
-                    title: "Full Disk Access",
-                    detail: "Needed to read ~/Library/Messages/chat.db",
+                    title: String(localized: "Full Disk Access"),
+                    detail: String(localized: "Needed to read ~/Library/Messages/chat.db"),
                     ok: fdaOK,
                     settingsURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
                 )
                 permissionRow(
-                    title: "Automation — Messages",
-                    detail: "Needed to send replies from the app",
+                    title: String(localized: "Automation — Messages"),
+                    detail: String(localized: "Needed to send replies from the app"),
                     ok: automationOK,
                     settingsURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"
                 )
@@ -101,7 +101,9 @@ struct SettingsView: View {
         Task {
             // Inherits MainActor from the view, so state assignment is safe.
             let fda = await ChatDBReader.shared.fullDiskAccessOK()
-            let automation = MessageSender.automationAvailable()
+            // osascript can take a few seconds (and show the permission
+            // prompt); don't freeze the window while it runs.
+            let automation = (try? await BlockingWork.run { MessageSender.automationAvailable() }) ?? false
             fdaOK = fda
             automationOK = automation
         }
@@ -216,7 +218,7 @@ struct ChatPickerView: View {
                                 Text(chat.participants).lineLimit(1)
                             }
                             HStack(spacing: 4) {
-                                Text("\(chat.messageCount) messages")
+                                Text("^[\(chat.messageCount) message](inflect: true)")
                                 if let date = chat.lastDate {
                                     Text("·")
                                     Text(Self.dateFormatter.string(from: date))

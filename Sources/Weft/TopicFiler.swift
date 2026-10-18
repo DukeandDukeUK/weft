@@ -216,7 +216,7 @@ struct TopicFiler: Sendable {
             guard !(loops + mine).contains(where: { $0.sourceMessageId == id && $0.owner == .me }) else { continue }
             var text = newMessages[i].text.replacingOccurrences(of: "\n", with: " ")
             if text.count > 200 { text = String(text.prefix(200)) + "…" }
-            mine.append(OpenLoop(id: UUID(), title: title, detail: "You said: \u{201C}\(text)\u{201D}", status: .open,
+            mine.append(OpenLoop(id: UUID(), title: title, detail: String(localized: "You said: \u{201C}\(text)\u{201D}"), status: .open,
                                  createdDate: now, sourceMessageId: id, owner: .me, dueDate: DueDateParser.parse(p.due)))
         }
         loops += mine

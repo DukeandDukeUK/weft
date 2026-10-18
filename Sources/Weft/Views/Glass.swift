@@ -61,23 +61,16 @@ enum WeftStyle {
     /// Your bubbles: the icon's indigo with white text.
     static let myBubble = Color(light: Color(red: 0.27, green: 0.35, blue: 0.88),   // 5.6:1 with white text
                                 dark: Color(red: 0.26, green: 0.33, blue: 0.70))
-    /// Their bubbles: plain cool gray, so they stand out from the indigo wash.
+    /// Link cards and other neutral surfaces: plain cool gray. (Their
+    /// message bubbles take the conversation's hue instead.)
     static let theirBubble = Color(light: Color(red: 0.82, green: 0.83, blue: 0.87),
                                    dark: Color(red: 0.21, green: 0.22, blue: 0.29))
     /// Text in their bubbles: solid, for the most contrast on the gray.
     static let theirText = Color(light: .black, dark: .white)
-    /// Conversation background: one flat, quiet indigo-white (light) / deep indigo (dark).
-    static let canvasTop = Color(light: Color(red: 0.97, green: 0.97, blue: 0.99),
-                                 dark: Color(red: 0.09, green: 0.09, blue: 0.17))
-    static let canvasBottom = Color(light: Color(red: 0.97, green: 0.97, blue: 0.99),
-                                    dark: Color(red: 0.09, green: 0.09, blue: 0.17))
     /// Unread-count badges: the icon's indigo in both modes (6.2:1 with white).
     static let badge = Color(red: 0.27, green: 0.31, blue: 0.86)
-    /// Sidebar selection.
-    static let selection = LinearGradient(
-        colors: [accent.opacity(0.24), teal.opacity(0.20)],
-        startPoint: .leading, endPoint: .trailing
-    )
+    // The conversation canvas, their bubbles and the sidebar selection take
+    // the open conversation's own hue: see ConversationColors.
 
     static let bubbleRadius: CGFloat = 18
     static let readableWidth: CGFloat = 760
@@ -96,11 +89,11 @@ extension Color {
 enum RelativeTime {
     static func short(_ date: Date, now: Date = Date()) -> String {
         let seconds = now.timeIntervalSince(date)
-        if seconds < 60 { return "now" }
-        if seconds < 3600 { return "\(Int(seconds / 60))m" }
+        if seconds < 60 { return String(localized: "now", comment: "Thread row: less than a minute ago") }
+        if seconds < 3600 { return String(localized: "\(Int(seconds / 60))m", comment: "Thread row: minutes ago") }
         let calendar = Calendar.current
-        if calendar.isDateInToday(date) { return "\(Int(seconds / 3600))h" }
-        if calendar.isDateInYesterday(date) { return "Yesterday" }
+        if calendar.isDateInToday(date) { return String(localized: "\(Int(seconds / 3600))h", comment: "Thread row: hours ago") }
+        if calendar.isDateInYesterday(date) { return String(localized: "Yesterday") }
         if seconds < 6 * 86_400 {
             return date.formatted(.dateTime.weekday(.abbreviated))
         }

@@ -3,13 +3,19 @@ import SQLite3
 
 // MARK: - AttributedBodyParser
 
-/// `message.attributedBody` is a BLOB holding a binary-plist NSKeyedArchiver
-/// of an NSAttributedString. `message.text` is NULL for rich-text messages
-/// (and for tapbacks/reactions), so we need this to recover their content.
+/// `message.attributedBody` holds the message as an archived
+/// NSAttributedString. `message.text` is NULL for rich-text messages (and
+/// for tapbacks/reactions), so we need this to recover their content.
+///
+/// Messages writes the old NSArchiver "typedstream" format, not a keyed
+/// archive, so that is read first, byte by byte. A keyed archive is also
+/// accepted (fixtures, future versions), and a lossy text scan is the last
+/// resort.
 enum AttributedBodyParser {
     static func string(from data: Data) -> String? {
-        // 1) Proper decode: the archive's top object is an (mutable)
-        //    attributed string whose backing store is NSString.
+        // 1) The format Messages actually writes.
+        if let s = typedStreamString(in: data) { return s }
+        // 2) A keyed archive of an (mutable) attributed string.
         do {
             let classes: [AnyClass] = [
                 NSAttributedString.self,
@@ -24,18 +30,88 @@ enum AttributedBodyParser {
         } catch {
             // Fall through to the heuristic below.
         }
-        // 2) Heuristic fallback: the bplist usually embeds the raw string, so
-        //    a lossy UTF-8 decode plus "longest printable run" recovers it.
+        // 3) Heuristic fallback: the archive usually embeds the raw string,
+        //    so a lossy UTF-8 decode plus "longest printable run" recovers it.
         return longestPrintableRun(in: data)
     }
+
+    /// The string inside an NSArchiver typedstream of an attributed string.
+    ///
+    /// Layout: a `streamtyped` header, the class chain
+    /// (NSMutableAttributedString → NSAttributedString → NSObject), then the
+    /// backing NSMutableString/NSString, whose value is written as the type
+    /// tag `+` (0x2B, a C string) followed by a length and the UTF-8 bytes.
+    /// Lengths are one byte, or 0x81 + UInt16 LE, or 0x82 + UInt32 LE.
+    /// Everything after that (attribute runs, dictionaries) is ignored.
+    /// Visible for unit tests.
+    static func typedStreamString(in data: Data) -> String? {
+        let bytes = [UInt8](data)
+        guard bytes.count > 24, firstIndex(of: Array("streamtyped".utf8), in: bytes, from: 0, limit: 24) != nil else { return nil }
+        // The backing string's class: NSMutableString as a rule, NSString
+        // now and then. (NSAttributedString contains neither name.)
+        let classes = ["NSMutableString", "NSString"].map { Array($0.utf8) }
+        guard let found = classes
+            .compactMap({ name in firstIndex(of: name, in: bytes, from: 0, limit: bytes.count).map { (at: $0, name: name) } })
+            .min(by: { $0.at < $1.at }) else { return nil }
+        // The value tag follows the class name within a few bytes
+        // ("NSMutableString\0 \x01 \x94 \x84 \x01 +").
+        let start = found.at + found.name.count
+        guard let tagAt = firstIndex(of: [0x01, 0x2B], in: bytes, from: start, limit: min(bytes.count, start + 24)) else { return nil }
+        var i = tagAt + 2
+        guard i < bytes.count else { return nil }
+        let length: Int
+        switch bytes[i] {
+        case 0x81:
+            guard i + 2 < bytes.count else { return nil }
+            length = Int(bytes[i + 1]) | (Int(bytes[i + 2]) << 8)
+            i += 3
+        case 0x82:
+            guard i + 4 < bytes.count else { return nil }
+            length = Int(bytes[i + 1]) | (Int(bytes[i + 2]) << 8) | (Int(bytes[i + 3]) << 16) | (Int(bytes[i + 4]) << 24)
+            i += 5
+        default:
+            length = Int(bytes[i])
+            i += 1
+        }
+        guard length > 0, i + length <= bytes.count,
+              let text = String(bytes: bytes[i..<(i + length)], encoding: .utf8) else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Index of the first occurrence of `needle` in `haystack` at or after
+    /// `from`, looking no further than `limit`.
+    private static func firstIndex(of needle: [UInt8], in haystack: [UInt8], from: Int, limit: Int) -> Int? {
+        guard !needle.isEmpty, from >= 0 else { return nil }
+        let last = min(limit, haystack.count) - needle.count
+        guard last >= from else { return nil }
+        var i = from
+        while i <= last {
+            if haystack[i] == needle[0] {
+                var j = 1
+                while j < needle.count && haystack[i + j] == needle[j] { j += 1 }
+                if j == needle.count { return i }
+            }
+            i += 1
+        }
+        return nil
+    }
+
+    /// Names that appear in the archive and are never the message.
+    private static let archiveNoise = ["streamtyped", "NSMutableAttributedString", "NSAttributedString", "NSMutableString",
+                                       "NSString", "NSObject", "NSDictionary", "NSNumber", "NSValue", "NSArray",
+                                       "__kIM", "__kNS", "NSFont", "NSColor", "NSParagraphStyle"]
 
     /// Visible so it can be unit-tested on platforms without NSKeyedUnarchiver data.
     static func longestPrintableRun(in data: Data) -> String? {
         let lossy = String(decoding: data, as: UTF8.self) // invalid bytes -> U+FFFD
         var best: String?
-        for piece in lossy.split(separator: "�") {
-            let t = piece.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard t.count > 3, t.rangeOfCharacter(from: .letters) != nil else { continue }
+        for piece in lossy.split(separator: "\u{FFFD}") {
+            // Length bytes and type tags sit right before the text.
+            let cleaned = piece.drop(while: { $0.asciiValue.map { $0 < 0x20 } ?? false })
+            let t = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard t.count > 3, t.rangeOfCharacter(from: .letters) != nil,
+                  !archiveNoise.contains(where: { t.hasPrefix($0) }) else { continue }
             if t.count > (best?.count ?? 0) { best = t }
         }
         return best
@@ -77,11 +153,11 @@ actor ChatDBReader {
         var errorDescription: String? {
             switch self {
             case .noDatabase:
-                return "No Messages database found at ~/Library/Messages/chat.db. Is the Messages app set up and signed in on this Mac?"
+                return String(localized: "No Messages database found at ~/Library/Messages/chat.db. Is the Messages app set up and signed in on this Mac?")
             case .accessDenied(let why):
-                return "Could not read the Messages database (\(why)). Grant Full Disk Access in System Settings > Privacy & Security > Full Disk Access."
+                return String(localized: "Could not read the Messages database (\(why)). Grant Full Disk Access in System Settings > Privacy & Security > Full Disk Access.")
             case .queryFailed(let why):
-                return "Messages database query failed: \(why)"
+                return String(localized: "Messages database query failed: \(why)")
             }
         }
     }

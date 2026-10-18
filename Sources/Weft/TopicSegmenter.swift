@@ -13,7 +13,7 @@ struct TopicSegmenter: Sendable {
             case .badJSON(let raw):
                 return "The model did not return valid topic JSON. Raw output (truncated): \(raw.prefix(300))"
             case .noUsableSegments:
-                return "The model returned no usable topic segments."
+                return String(localized: "The model returned no usable topic segments.")
             }
         }
     }

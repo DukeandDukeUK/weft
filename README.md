@@ -23,10 +23,12 @@ Weft sorts any conversation in Messages, so it works with AI assistants you talk
 - **Photos and files** show in the conversation (click to open). Right-click → **Open in Messages**.
 - **Links** show as preview cards like in Messages (image, title and site) and open with a click. Weft uses the preview Messages already saved, so it never contacts the website itself.
 - **Reactions** (❤️ 👍 ✅ …) show on messages just like in Messages, including several people's in a group — click them to see who reacted.
+- **A colour per conversation.** Each conversation gets its own hue — on its row in the sidebar, the topic header, the background and the other side's bubbles — so you always know whose conversation you're in. In a group chat each person has their own. Your own bubbles stay Weft's indigo. Right-click a conversation → **Color** to pick a different one.
 - **Contact names** next to phone numbers, if you allow Contacts access.
 - **Notifications.** A red count on Weft's Dock icon and next to each conversation, plus optional notifications with a sound you pick. Clicking one opens that conversation.
 - **Automatic updates.** Weft checks for new versions and offers to install them (Weft → Check for Updates…).
 - **Light, Dark or Automatic** appearance, and a **Text size** from Small to Largest (Settings → Appearance, or View → Bigger Text ⌘+ / Smaller Text ⌘−).
+- **Ready to translate.** Everything on screen comes from a string catalog (`Sources/Weft/Resources/Localizable.xcstrings`); the app is in English today, and a translation is a matter of filling the catalog in.
 
 Weft never changes your Messages history. It only reads it, and sends a message when you press Send.
 

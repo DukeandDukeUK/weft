@@ -12,12 +12,12 @@ enum Provider: String, CaseIterable, Identifiable, Sendable {
 
     var displayName: String {
         switch self {
-        case .claude: return "Claude (Claude subscription)"
-        case .codex: return "ChatGPT (Codex CLI, ChatGPT subscription)"
-        case .gemini: return "Gemini (Gemini CLI, Google account)"
-        case .grok: return "Grok (Grok CLI, SuperGrok / X subscription)"
-        case .ollama: return "Ollama (local)"
-        case .lmstudio: return "LM Studio (local)"
+        case .claude: return String(localized: "Claude (Claude subscription)")
+        case .codex: return String(localized: "ChatGPT (Codex CLI, ChatGPT subscription)")
+        case .gemini: return String(localized: "Gemini (Gemini CLI, Google account)")
+        case .grok: return String(localized: "Grok (Grok CLI, SuperGrok / X subscription)")
+        case .ollama: return String(localized: "Ollama (local)")
+        case .lmstudio: return String(localized: "LM Studio (local)")
         }
     }
 
@@ -47,12 +47,12 @@ enum Provider: String, CaseIterable, Identifiable, Sendable {
 
     var setupHint: String {
         switch self {
-        case .claude: return "Install Claude Code, then run `claude` once in Terminal and sign in."
-        case .codex: return "Install the Codex CLI, then run `codex login` in Terminal and sign in with ChatGPT."
-        case .gemini: return "Install the Gemini CLI, then run `gemini` once in Terminal and sign in with Google."
-        case .grok: return "Install the Grok CLI (version 1.0.13 or later), then run `grok login` in Terminal."
-        case .ollama: return "Install Ollama and download a model (e.g. `ollama pull qwen3:8b`)."
-        case .lmstudio: return "Install LM Studio, load a model, and start its local server (port 1234)."
+        case .claude: return String(localized: "Install Claude Code, then run `claude` once in Terminal and sign in.")
+        case .codex: return String(localized: "Install the Codex CLI, then run `codex login` in Terminal and sign in with ChatGPT.")
+        case .gemini: return String(localized: "Install the Gemini CLI, then run `gemini` once in Terminal and sign in with Google.")
+        case .grok: return String(localized: "Install the Grok CLI (version 1.0.13 or later), then run `grok login` in Terminal.")
+        case .ollama: return String(localized: "Install Ollama and download a model (e.g. `ollama pull qwen3:8b`).")
+        case .lmstudio: return String(localized: "Install LM Studio, load a model, and start its local server (port 1234).")
         }
     }
 
@@ -90,6 +90,9 @@ struct ProviderStatus: Sendable {
     var detail: String
     /// Models a local server reports (empty for subscription tools).
     var localModels: [String] = []
+    /// A local server that isn't running at all (as opposed to running
+    /// with nothing downloaded).
+    var notRunning = false
 }
 
 enum ProviderDetector {
@@ -98,15 +101,17 @@ enum ProviderDetector {
             if let path = CommandLocator.find(name) {
                 return ProviderStatus(found: true, detail: path)
             }
-            return ProviderStatus(found: false, detail: "`\(name)` not found")
+            return ProviderStatus(found: false, detail: String(localized: "`\(name)` not found", comment: "Command-line tool not installed"))
         }
         let models = await LocalServer.listModels(provider)
         guard let models else {
-            return ProviderStatus(found: false, detail: "not running")
+            return ProviderStatus(found: false, detail: String(localized: "not running", comment: "Local model server"), notRunning: true)
         }
         return ProviderStatus(
             found: !models.isEmpty,
-            detail: models.isEmpty ? "running, but no models downloaded" : "\(models.count) model(s)",
+            detail: models.isEmpty
+                ? String(localized: "running, but no models downloaded", comment: "Local model server")
+                : String(localized: "^[\(models.count) model](inflect: true)", comment: "Local model server"),
             localModels: models
         )
     }
@@ -144,9 +149,10 @@ enum CommandLocator {
         proc.standardOutput = out
         proc.standardError = FileHandle.nullDevice
         guard (try? proc.run()) != nil else { return nil }
-        proc.waitUntilExit()
+        // Read before waiting: a full pipe would otherwise block the child.
         let path = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        proc.waitUntilExit()
         return (proc.terminationStatus == 0 && path.hasPrefix("/")) ? path : nil
     }
 }
@@ -176,21 +182,23 @@ struct LLMClient: Sendable {
         var errorDescription: String? {
             switch self {
             case .notInstalled(let p):
-                return "Couldn't find the \(p.executableName ?? "") command-line tool. \(p.setupHint)"
+                return String(localized: "Couldn't find the \(p.executableName ?? "") command-line tool. \(p.setupHint)")
             case .noLocalModel(let p):
-                return "No model chosen for \(p.displayName). \(p.setupHint)"
+                return String(localized: "No model chosen for \(p.displayName). \(p.setupHint)")
             case .launchFailed(let why):
-                return "Couldn't start the tool: \(why)"
+                return String(localized: "Couldn't start the tool: \(why)")
             case .failed(let p, let code, let message):
-                return "\(p.executableName ?? "Tool") exited with code \(code): \(message.isEmpty ? "no error output" : message). If it says you're signed out: \(p.setupHint)"
+                let tool = p.executableName ?? String(localized: "Tool", comment: "Generic name for a command-line tool")
+                let detail = message.isEmpty ? String(localized: "no error output") : message
+                return String(localized: "\(tool) exited with code \(Int(code)): \(detail). If it says you're signed out: \(p.setupHint)")
             case .unreachable(let why):
-                return "Couldn't reach the local model server (\(why)). Is it running?"
+                return String(localized: "Couldn't reach the local model server (\(why)). Is it running?")
             case .httpStatus(let code, let body):
-                return "Model server returned HTTP \(code): \(body.prefix(300))"
+                return String(localized: "Model server returned HTTP \(code): \(String(body.prefix(300)))")
             case .badPayload(let why):
-                return "Unexpected reply from the model server: \(why)"
+                return String(localized: "Unexpected reply from the model server: \(why)")
             case .timedOut:
-                return "The AI took longer than 10 minutes and was stopped."
+                return String(localized: "The AI took longer than 10 minutes and was stopped.")
             }
         }
     }
@@ -216,9 +224,11 @@ struct LLMClient: Sendable {
         switch provider {
         case .claude, .codex, .gemini, .grok:
             let p = provider, m = model, e = effort, f = fast
-            (reply, usage) = try await Task.detached(priority: .userInitiated) {
+            // Off the concurrency pool: the tool can take minutes, and a
+            // blocked pool thread would stall the rest of the app.
+            (reply, usage) = try await BlockingWork.run {
                 try CLIRunner.run(provider: p, model: m, effort: e, fast: f, systemPrompt: systemPrompt, input: userPrompt)
-            }.value
+            }
         case .ollama, .lmstudio:
             guard !model.isEmpty else { throw ClientError.noLocalModel(provider) }
             (reply, usage) = try await LocalServer.complete(provider: provider, model: model, systemPrompt: systemPrompt, userPrompt: userPrompt)
@@ -232,8 +242,8 @@ struct LLMClient: Sendable {
     func testConnection() async -> Result<String, Error> {
         do {
             let reply = try await complete(systemPrompt: "Reply with exactly: ok", userPrompt: "ping", purpose: .connectionTest)
-            let modelLabel = model.isEmpty ? "default model" : model
-            return .success("Connected — \(modelLabel) replied \"\(reply.prefix(40))\".")
+            let modelLabel = model.isEmpty ? String(localized: "default model") : model
+            return .success(String(localized: "Connected — \(modelLabel) replied \u{201C}\(String(reply.prefix(40)))\u{201D}."))
         } catch {
             return .failure(error)
         }
@@ -339,31 +349,30 @@ enum CLIRunner {
         proc.standardOutput = outPipe
         proc.standardError = errPipe
 
+        // Output is collected as it arrives, so a full pipe can't stall the
+        // child. The wait ends when the child EXITS, not when the pipes
+        // close: a helper process the tool leaves behind can keep the pipe
+        // open long after the answer is complete, which used to look like
+        // a ten-minute hang.
+        let output = OutputCollector()
+        output.attach(stdout: outPipe.fileHandleForReading, stderr: errPipe.fileHandleForReading)
+        let exited = DispatchSemaphore(value: 0)
+        proc.terminationHandler = { _ in exited.signal() }
         do {
             try proc.run()
         } catch {
+            _ = output.finish()
             throw LLMClient.ClientError.launchFailed(error.localizedDescription)
         }
-
-        // Drain both pipes concurrently so a full buffer can't stall the child.
-        var outData = Data()
-        var errData = Data()
-        let group = DispatchGroup()
-        group.enter()
-        DispatchQueue.global().async {
-            outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-            group.leave()
-        }
-        group.enter()
-        DispatchQueue.global().async {
-            errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-            group.leave()
-        }
-        if group.wait(timeout: .now() + LLMClient.timeout) == .timedOut {
+        if exited.wait(timeout: .now() + LLMClient.timeout) == .timedOut {
             proc.terminate()
+            _ = exited.wait(timeout: .now() + 5)
+            _ = output.finish()
             throw LLMClient.ClientError.timedOut
         }
-        proc.waitUntilExit()
+        // The last of the output can land just after exit: give it a moment.
+        output.waitForEOF(seconds: 2)
+        let (outData, errData) = output.finish()
 
         let out = String(data: outData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let err = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

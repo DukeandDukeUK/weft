@@ -40,7 +40,7 @@ struct AISettingsSection: View {
             }
 
             HStack {
-                Button(isDetecting ? "Checking…" : "Check what's installed") {
+                Button(isDetecting ? String(localized: "Checking…") : String(localized: "Check what's installed")) {
                     Task { await detect() }
                 }
                 .disabled(isDetecting)
@@ -106,7 +106,7 @@ struct AISettingsSection: View {
                 Text("Default (the tool chooses) — Recommended").tag("")
             }
             ForEach(ordered) { option in
-                Text(option.id == recommended ? "\(option.label) — Recommended" : option.label).tag(option.id)
+                Text(option.id == recommended ? String(localized: "\(option.label) — Recommended") : option.label).tag(option.id)
             }
             Divider()
             Text("Other…").tag("__other__")
@@ -182,7 +182,7 @@ struct AISettingsSection: View {
     private func ollamaSetup(status: ProviderStatus) -> some View {
         let tier = store.current.recommendedLocalModel()
         let recommended = (name: tier?.model ?? "qwen3:4b", size: tier?.size ?? "2.5 GB")
-        if status.detail == "not running" {
+        if status.notRunning {
             VStack(alignment: .leading, spacing: 8) {
                 Text("**Free option, private to this Mac.** Two steps:")
                 Text("1. Download and open Ollama (a free app that runs AI models on your Mac).")
@@ -235,16 +235,18 @@ struct AISettingsSection: View {
 
     private func label(for provider: Provider) -> String {
         guard let status = statuses[provider] else { return provider.displayName }
-        return provider.displayName + (status.found ? " — found" : " — not set up")
+        return status.found
+            ? String(localized: "\(provider.displayName) — found", comment: "AI picker: the tool is installed")
+            : String(localized: "\(provider.displayName) — not set up", comment: "AI picker: the tool is not installed")
     }
 
     private func privacyNote(_ provider: Provider) -> String {
         switch provider {
-        case .claude: return "Conversation text is sent to Anthropic for sorting and counts against your Claude plan's usage. No API key is used."
-        case .codex: return "Conversation text is sent to OpenAI for sorting and counts against your ChatGPT plan's usage. No API key is used."
-        case .gemini: return "Conversation text is sent to Google for sorting, using your Google account's Gemini CLI allowance. No API key is used."
-        case .grok: return "Conversation text is sent to xAI for sorting and counts against your Grok plan's usage. No API key is used."
-        case .ollama, .lmstudio: return "Message processing stays on this Mac."
+        case .claude: return String(localized: "Conversation text is sent to Anthropic for sorting and counts against your Claude plan's usage. No API key is used.")
+        case .codex: return String(localized: "Conversation text is sent to OpenAI for sorting and counts against your ChatGPT plan's usage. No API key is used.")
+        case .gemini: return String(localized: "Conversation text is sent to Google for sorting, using your Google account's Gemini CLI allowance. No API key is used.")
+        case .grok: return String(localized: "Conversation text is sent to xAI for sorting and counts against your Grok plan's usage. No API key is used.")
+        case .ollama, .lmstudio: return String(localized: "Message processing stays on this Mac.")
         }
     }
 }
@@ -262,7 +264,7 @@ final class OllamaPull {
     func run(model: String) async {
         isRunning = true
         fraction = 0
-        status = "Starting download…"
+        status = String(localized: "Starting download…")
         error = nil
         defer { isRunning = false }
 
@@ -281,7 +283,7 @@ final class OllamaPull {
         do {
             let (bytes, response) = try await URLSession.shared.bytes(for: request)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                error = "Ollama refused the download."
+                error = String(localized: "Ollama refused the download.")
                 return
             }
             for try await line in bytes.lines {
@@ -293,10 +295,10 @@ final class OllamaPull {
                     fraction = Double(done) / Double(total)
                 }
             }
-            status = "Done"
+            status = String(localized: "Done", comment: "Download finished")
             fraction = 1
         } catch {
-            self.error = "Download failed: \(error.localizedDescription)"
+            self.error = String(localized: "Download failed: \(error.localizedDescription)")
         }
     }
 }

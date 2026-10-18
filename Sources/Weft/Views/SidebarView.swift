@@ -5,6 +5,7 @@ import SwiftUI
 struct SidebarView: View {
     @Bindable var viewModel: WeftViewModel
     @Environment(\.undoManager) private var undoManager
+    @Environment(\.conversationPalette) private var palette
     @State private var renaming: Topic?
     @State private var showDone = false
     @State private var showSnoozed = false
@@ -18,15 +19,23 @@ struct SidebarView: View {
                 ForEach(viewModel.followedChats) { chat in
                     // A tap, not a Button: a Button takes the mouse press,
                     // which stops the list from starting a drag to reorder.
+                    let chatPalette = ConversationColors.palette(forChat: chat.id, settings: viewModel.settings)
                     ConversationRow(
                         isSelected: viewModel.settings.selectedChatRowID == chat.id,
+                        highlight: chatPalette.soft,
                         action: { Task { await viewModel.selectChat(chat) } }
                     ) {
                         Label {
                             Text(ContactNames.shared.shortDisplay(chat.participants)).lineLimit(1)
                         } icon: {
-                            Image(systemName: chat.participants.contains(",") ? "person.3.fill" : "person.crop.circle.fill")
-                                .foregroundStyle(WeftStyle.accent)
+                            // One person: their photo or initials. A group:
+                            // the group symbol. Both in the conversation's hue.
+                            if chat.participants.contains(",") {
+                                Image(systemName: "person.3.fill")
+                                    .foregroundStyle(chatPalette.tint)
+                            } else {
+                                Avatar(handle: chat.participants, size: 22, tint: chatPalette.tint)
+                            }
                         }
                         Spacer(minLength: 4)
                         let count = viewModel.settings.selectedChatRowID == chat.id
@@ -40,7 +49,7 @@ struct SidebarView: View {
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
                                 .background(WeftStyle.badge, in: Capsule())
-                                .help("\(count) new message\(count == 1 ? "" : "s")")
+                                .help(String(localized: "^[\(count) new message](inflect: true)"))
                         }
                     }
                     .contextMenu {
@@ -54,6 +63,20 @@ struct SidebarView: View {
                             get: { viewModel.settings.recentOnlyChats.contains(chat.id) },
                             set: { viewModel.setRecentOnly(chat.id, $0) }
                         ))
+                        Menu("Color") {
+                            let chosen = viewModel.settings.hueIndex(forChat: chat.id)
+                            Toggle("Automatic", isOn: Binding(
+                                get: { chosen == nil },
+                                set: { if $0 { viewModel.settings.setHueIndex(nil, forChat: chat.id) } }
+                            ))
+                            Divider()
+                            ForEach(ConversationColors.all) { hue in
+                                Toggle(hue.name, isOn: Binding(
+                                    get: { chosen == hue.id },
+                                    set: { if $0 { viewModel.settings.setHueIndex(hue.id, forChat: chat.id) } }
+                                ))
+                            }
+                        }
                         Divider()
                         Button("Remove from Weft", role: .destructive) {
                             Task { await viewModel.removeConversation(chat.id) }
@@ -106,8 +129,12 @@ struct SidebarView: View {
                                 }
                             }
                         } icon: {
-                            Image(systemName: "bubble.left.and.bubble.right")
-                                .foregroundStyle(WeftStyle.accent)
+                            // A dot in the conversation's hue ties the topic
+                            // to the conversation it belongs to.
+                            Circle()
+                                .fill(palette.tint)
+                                .frame(width: 8, height: 8)
+                                .padding(.top, 5)
                         }
                         Spacer(minLength: 4)
                         VStack(alignment: .trailing, spacing: 3) {
@@ -177,21 +204,21 @@ struct SidebarView: View {
                                 .padding(.leading, 6)
                         }
                         if !owed.isEmpty {
-                            groupLabel("Owed by me")
+                            groupLabel(String(localized: "Owed by me"))
                             ForEach(owed) { loop in loopRow(loop, now: now) }
                         }
                         if !waiting.isEmpty {
-                            groupLabel("Waiting on them")
+                            groupLabel(String(localized: "Waiting on them"))
                             ForEach(waiting) { loop in loopRow(loop, now: now) }
                         }
                         if !snoozed.isEmpty {
-                            expandRow("Snoozed (\(snoozed.count))", isOpen: $showSnoozed)
+                            expandRow(String(localized: "Snoozed (\(snoozed.count))"), isOpen: $showSnoozed)
                             if showSnoozed {
                                 ForEach(snoozed) { loop in loopRow(loop, now: now) }
                             }
                         }
                         if !done.isEmpty {
-                            expandRow("Done (\(done.count))", isOpen: $showDone)
+                            expandRow(String(localized: "Done (\(done.count))"), isOpen: $showDone)
                             if showDone {
                                 ForEach(done) { loop in loopRow(loop, now: now) }
                             }
@@ -259,7 +286,9 @@ struct SidebarView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(loop.title).lineLimit(2)
                     if loop.status == .open, let due = loop.dueDate {
-                        Text(loop.isOverdue(at: now) ? "Overdue · \(due.formatted(.dateTime.month(.abbreviated).day()))" : "Due \(due.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))")
+                        Text(loop.isOverdue(at: now)
+                             ? String(localized: "Overdue · \(due.formatted(.dateTime.month(.abbreviated).day()))")
+                             : String(localized: "Due \(due.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))"))
                             .scaledFont(.caption2)
                             .foregroundStyle(loop.isOverdue(at: now) ? Color.red : Color.secondary)
                     }
@@ -269,13 +298,13 @@ struct SidebarView: View {
                     .foregroundStyle(loop.isOverdue(at: now) ? Color.red : Color.primary)
             }
             .foregroundStyle(loop.status == .open ? .primary : .secondary)
-            .accessibilityLabel("\(loop.title), \(loop.status == .open ? "open" : (loop.status == .resolved ? "done" : "dismissed"))")
+            .accessibilityLabel(Text("\(loop.title), \(loop.status == .open ? String(localized: "open") : (loop.status == .resolved ? String(localized: "done") : String(localized: "dismissed")))"))
             Spacer()
         }
     }
 
     private func chatTitle(_ chat: ChatInfo) -> String {
-        chat.participants.isEmpty ? "Conversation" : ContactNames.shared.display(chat.participants)
+        chat.participants.isEmpty ? String(localized: "Conversation") : ContactNames.shared.display(chat.participants)
     }
 }
 
@@ -283,18 +312,20 @@ struct SidebarView: View {
 /// list can drag it to reorder.
 private struct ConversationRow<Content: View>: View {
     let isSelected: Bool
+    /// Selection colour: this conversation's own.
+    let highlight: Color
     let action: () -> Void
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline) { content() }
-            .padding(.vertical, 7)
+        HStack(alignment: .center) { content() }
+            .padding(.vertical, 6)
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isSelected ? AnyShapeStyle(WeftStyle.selection) : AnyShapeStyle(Color.clear))
+                    .fill(isSelected ? highlight : Color.clear)
             )
             .fontWeight(isSelected ? .semibold : .regular)
             .onTapGesture(perform: action)
@@ -307,11 +338,13 @@ private struct ConversationRow<Content: View>: View {
     }
 }
 
-/// A full-width clickable row with a selected highlight.
+/// A full-width clickable row with a selected highlight (in the open
+/// conversation's colour).
 private struct SidebarRow<Content: View>: View {
     let isSelected: Bool
     let action: () -> Void
     @ViewBuilder let content: () -> Content
+    @Environment(\.conversationPalette) private var palette
 
     var body: some View {
         Button(action: action) {
@@ -322,7 +355,7 @@ private struct SidebarRow<Content: View>: View {
                 .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .background(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(isSelected ? AnyShapeStyle(WeftStyle.selection) : AnyShapeStyle(Color.clear))
+                        .fill(isSelected ? palette.soft : Color.clear)
                 )
                 .fontWeight(isSelected ? .semibold : .regular)
         }

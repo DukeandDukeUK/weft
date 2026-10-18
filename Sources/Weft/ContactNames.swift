@@ -44,7 +44,8 @@ final class ContactNames {
         } else if status != .authorized {
             return
         }
-        let loaded = await Task.detached { Self.readAll(store) }.value
+        // Reading the whole address book blocks; keep it off the pool.
+        guard let loaded = try? await BlockingWork.run({ Self.readAll(store) }) else { return }
         names = loaded.names
         photos = loaded.photos
     }

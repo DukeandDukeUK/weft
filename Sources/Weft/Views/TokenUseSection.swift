@@ -16,10 +16,10 @@ struct TokenUseSection: View {
 
     var body: some View {
         Section("AI usage") {
-            row("Today", since: Calendar.current.startOfDay(for: Date()))
-            row("Last 7 days", since: Date().addingTimeInterval(-7 * 86_400))
-            row("Last 30 days", since: Date().addingTimeInterval(-30 * 86_400))
-            row("All time", since: nil)
+            row(String(localized: "Today"), since: Calendar.current.startOfDay(for: Date()))
+            row(String(localized: "Last 7 days"), since: Date().addingTimeInterval(-7 * 86_400))
+            row(String(localized: "Last 30 days"), since: Date().addingTimeInterval(-30 * 86_400))
+            row(String(localized: "All time"), since: nil)
 
             DisclosureGroup("Recent calls") {
                 if log.entries.isEmpty {
@@ -30,10 +30,10 @@ struct TokenUseSection: View {
                             HStack {
                                 Text(entry.purpose.label)
                                 Spacer()
-                                Text(entry.usage.map { Self.format($0.total) + " tokens" } ?? "count not available")
+                                Text(entry.usage.map { String(localized: "\(Self.format($0.total)) tokens") } ?? String(localized: "count not available"))
                                     .monospacedDigit()
                             }
-                            Text("\(Self.timeFormatter.string(from: entry.date)) · \(entry.model)\(entry.usage.map { " · in \(Self.format($0.input)), cached \(Self.format($0.cachedInput)), out \(Self.format($0.output))" } ?? "")")
+                            Text("\(Self.timeFormatter.string(from: entry.date)) · \(entry.model)\(entry.usage.map { Self.breakdown($0) } ?? "")")
                                 .scaledFont(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -59,7 +59,7 @@ struct TokenUseSection: View {
             VStack(alignment: .trailing, spacing: 2) {
                 Text("\(Self.format(s.usage.total)) tokens")
                     .monospacedDigit()
-                Text("\(s.calls) call\(s.calls == 1 ? "" : "s") · in \(Self.format(s.usage.input)), cached \(Self.format(s.usage.cachedInput)), out \(Self.format(s.usage.output))\(s.unreported > 0 ? " · \(s.unreported) without counts" : "")")
+                Text("^[\(s.calls) call](inflect: true)\(Self.breakdown(s.usage))\(s.unreported > 0 ? String(localized: " · \(s.unreported) without counts") : "")")
                     .scaledFont(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -68,5 +68,11 @@ struct TokenUseSection: View {
 
     private static func format(_ n: Int) -> String {
         n.formatted(.number)
+    }
+
+    /// " · in 1,200, cached 800, out 90"
+    private static func breakdown(_ usage: TokenUsage) -> String {
+        String(localized: " · in \(format(usage.input)), cached \(format(usage.cachedInput)), out \(format(usage.output))",
+               comment: "Token counts: input, cached input, output")
     }
 }

@@ -107,6 +107,8 @@ final class WeftViewModel {
     }
 
     private var pollTask: Task<Void, Never>?
+    /// Registered once; `startup()` can run again from the Retry button.
+    @ObservationIgnored private var activationObserver: (any NSObjectProtocol)?
     private var watcher: ChatDBWatcher?
     private var isPolling = false
     private var autoSortTask: Task<Void, Never>?
@@ -115,6 +117,11 @@ final class WeftViewModel {
     private var lastReactionRowID: Int64 = 0
     /// Where each pending message is shown until Claude files it.
     private var provisionalTopic: [Int64: UUID] = [:]
+    /// How many filing calls each waiting message has been in without the
+    /// AI placing it. After `maxFilingAttempts` it's filed next to its
+    /// neighbour instead of being sent again and again.
+    @ObservationIgnored private var filingAttempts: [Int64: Int] = [:]
+    static let maxFilingAttempts = 3
     /// The thread you last replied in from this app. Your own reply goes
     /// straight into it; replies after it are filed by Claude with this
     /// thread as the likely home, until you reply elsewhere, send from your
@@ -134,6 +141,21 @@ final class WeftViewModel {
     var selectedChat: ChatInfo? {
         guard let id = settings.selectedChatRowID else { return nil }
         return chats.first { $0.id == id }
+    }
+
+    /// The open conversation's colours (its own hue, or the one you chose).
+    var palette: ConversationPalette {
+        guard let id = settings.selectedChatRowID else { return ConversationColors.palette(index: 0) }
+        return ConversationColors.palette(forChat: id, settings: settings)
+    }
+
+    /// The colours for one message's bubble: in a group chat each person
+    /// has their own; otherwise the conversation's.
+    func palette(for message: ChatMessage) -> ConversationPalette {
+        if isGroupChat, !message.isFromMe, !message.handleId.isEmpty {
+            return ConversationColors.palette(forHandle: message.handleId)
+        }
+        return palette
     }
 
     /// Sending is only supported for 1:1 conversations (one handle).
@@ -177,10 +199,9 @@ final class WeftViewModel {
 
     // MARK: - Lifecycle
 
-    static let noAIMessage = "No AI is set up to sort messages yet. Open Settings (gear icon) and pick one."
+    static let noAIMessage = String(localized: "No AI is set up to sort messages yet. Open Settings (gear icon) and pick one.")
 
     func startup() async {
-        settings.migrateLegacyConsentOnce()
         if let saved = UserDefaults.standard.dictionary(forKey: "weft.drafts") as? [String: String] {
             drafts = Dictionary(uniqueKeysWithValues: saved.compactMap { k, v in Int64(k).map { ($0, v) } })
         }
@@ -189,11 +210,16 @@ final class WeftViewModel {
             self?.chats.first { $0.id == id }.map { ContactNames.shared.shortDisplay($0.participants) } ?? "Messages"
         }
         // Coming back to Weft = you've now seen the open conversation.
-        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.didBecomeActive() }
+        if activationObserver == nil {
+            activationObserver = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.didBecomeActive() }
+            }
         }
         await RecommendationStore.shared.refresh()
         await settings.autoPickProviderIfNeeded()
+        // After the AI is known: the one-time migration counts already
+        // sorted conversations as OK'd for the AI in use.
+        settings.migrateLegacyConsentOnce()
         await checkForBetterLocalModel()
         isLoading = true
         defer { isLoading = false }
@@ -219,6 +245,11 @@ final class WeftViewModel {
             for id in settings.followedChats {
                 if let latest = try? await reader.latestMessageRowID(chatRowID: id) {
                     Notifier.shared.seed(chat: id, through: latest)
+                    // A conversation added before Weft tracked "last viewed"
+                    // would otherwise count its whole history as new.
+                    if settings.lastViewedRowID(chat: id) == 0 {
+                        settings.markViewed(chat: id, through: latest)
+                    }
                 }
             }
         } catch {
@@ -253,8 +284,9 @@ final class WeftViewModel {
         followUpQueue = []
         settings.selectedChatRowID = chat.id
         if !settings.followedChats.contains(chat.id) { settings.followedChats.append(chat.id) }
-        background.markRead(chat.id)
+        // Zero first: markRead refreshes the Dock badge from both counts.
         openUnread = 0
+        background.markRead(chat.id)
         // First-time setup: ask about notifications after the first pick.
         if !settings.notificationsOnboarded { showNotificationSetup = true }
         // For 1:1 chats the single participant is who we send to.
@@ -277,6 +309,8 @@ final class WeftViewModel {
             guard mySession == session else { return }
             pendingMessageIDs = []
             provisionalTopic = [:]
+            filingAttempts = [:]
+            summaryFailed = []
             // Restore the saved topics, then file anything that arrived while
             // the app was closed. No saved topics yet -> one full sort.
             if var cached = SegmentationCache.load(chatId: chat.id), !cached.topics.isEmpty {
@@ -421,7 +455,7 @@ final class WeftViewModel {
                 loops = mergeLoops(newLoops)
                 await reconcile(previouslyOpen: previouslyOpen, stillDetected: newLoops, client: client, session: mySession)
             case .failure(let error):
-                showNotice("Couldn't check follow-ups: \(error.localizedDescription)", action: "Retry") { [weak self] in
+                showNotice(String(localized: "Couldn't check follow-ups: \(error.localizedDescription)"), action: String(localized: "Retry")) { [weak self] in
                     Task { await self?.retryFollowUps() }
                 }
             }
@@ -441,7 +475,7 @@ final class WeftViewModel {
         } catch {
             guard mySession == session else { return }
             topicsStale = true
-            showNotice("Sorting failed: \(error.localizedDescription)", action: "Retry") { [weak self] in
+            showNotice(String(localized: "Sorting failed: \(error.localizedDescription)"), action: String(localized: "Retry")) { [weak self] in
                 Task { await self?.analyze() }
             }
         }
@@ -523,30 +557,34 @@ final class WeftViewModel {
 
     var queue: [QueueItem] {
         var items: [QueueItem] = []
-        let name = selectedChat.map { ContactNames.shared.shortDisplay($0.participants) } ?? "This conversation"
+        let name = selectedChat.map { ContactNames.shared.shortDisplay($0.participants) } ?? String(localized: "This conversation")
         if let chat = settings.selectedChatRowID {
             if settings.pausedChats.contains(chat) {
-                items.append(.init(conversation: name, status: pendingMessageIDs.isEmpty ? "Sorting paused" : "Sorting paused — \(pendingMessageIDs.count) new waiting", symbol: "pause.circle"))
+                let waiting = pendingMessageIDs.count
+                items.append(.init(conversation: name,
+                                   status: waiting == 0 ? String(localized: "Sorting paused") : String(localized: "Sorting paused — \(waiting) new waiting"),
+                                   symbol: "pause.circle"))
             } else if firstSortRequest != nil {
-                items.append(.init(conversation: name, status: "Waiting for your OK to sort", symbol: "hand.raised"))
+                items.append(.init(conversation: name, status: String(localized: "Waiting for your OK to sort"), symbol: "hand.raised"))
             } else if isAnalyzing && topics.isEmpty {
-                items.append(.init(conversation: name, status: "First sort in progress", symbol: "arrow.triangle.2.circlepath"))
+                items.append(.init(conversation: name, status: String(localized: "First sort in progress"), symbol: "arrow.triangle.2.circlepath"))
             } else if !pendingMessageIDs.isEmpty {
-                items.append(.init(conversation: name, status: "Filing \(pendingMessageIDs.count) new message\(pendingMessageIDs.count == 1 ? "" : "s")", symbol: "tray.and.arrow.down"))
+                items.append(.init(conversation: name, status: String(localized: "Filing ^[\(pendingMessageIDs.count) new message](inflect: true)"), symbol: "tray.and.arrow.down"))
             }
             if let p = historyProgress, p.total > 0 {
-                items.append(.init(conversation: name, status: "Sorting older history — \(Int(Double(p.done) / Double(p.total) * 100))%", symbol: "clock.arrow.circlepath"))
+                let percent = Int(Double(p.done) / Double(p.total) * 100)
+                items.append(.init(conversation: name, status: String(localized: "Sorting older history — \(percent)%"), symbol: "clock.arrow.circlepath"))
             }
             if let err = historyError {
-                items.append(.init(conversation: name, status: "Older history stopped: \(err)", symbol: "exclamationmark.triangle"))
+                items.append(.init(conversation: name, status: String(localized: "Older history stopped: \(err)"), symbol: "exclamationmark.triangle"))
             }
         }
         if let busy = background.working, let chat = chats.first(where: { $0.id == busy }) {
-            items.append(.init(conversation: ContactNames.shared.shortDisplay(chat.participants), status: "Filing new messages in the background", symbol: "tray.and.arrow.down"))
+            items.append(.init(conversation: ContactNames.shared.shortDisplay(chat.participants), status: String(localized: "Filing new messages in the background"), symbol: "tray.and.arrow.down"))
         }
         for id in settings.followedChats where id != settings.selectedChatRowID && settings.pausedChats.contains(id) {
             if let chat = chats.first(where: { $0.id == id }) {
-                items.append(.init(conversation: ContactNames.shared.shortDisplay(chat.participants), status: "Sorting paused", symbol: "pause.circle"))
+                items.append(.init(conversation: ContactNames.shared.shortDisplay(chat.participants), status: String(localized: "Sorting paused"), symbol: "pause.circle"))
             }
         }
         return items
@@ -569,7 +607,7 @@ final class WeftViewModel {
             saveCache(chat: myChat, filedThrough: Self.checkpoint(messages: messages, pending: pendingMessageIDs))
         } catch {
             guard mySession == session else { return }
-            showNotice("Couldn't check follow-ups: \(error.localizedDescription)", action: "Retry") { [weak self] in
+            showNotice(String(localized: "Couldn't check follow-ups: \(error.localizedDescription)"), action: String(localized: "Retry")) { [weak self] in
                 Task { await self?.retryFollowUps() }
             }
         }
@@ -616,7 +654,7 @@ final class WeftViewModel {
         guard let chat = firstSortRequest else { return }
         postponed.insert(chat.id)
         firstSortRequest = nil
-        showNotice("This conversation isn't being sorted.", action: "Sort…") { [weak self] in
+        showNotice(String(localized: "This conversation isn't being sorted."), action: String(localized: "Sort…")) { [weak self] in
             self?.postponed.remove(chat.id)
             self?.firstSortRequest = chat
         }
@@ -656,11 +694,17 @@ final class WeftViewModel {
     /// summary: ask the AI for one, in the same style as the sorted ones.
     /// Your title is kept. Only with your OK for this conversation.
     private var summarizing: Set<UUID> = []
+    /// Topics whose summary call failed: not asked again until the
+    /// conversation is reopened, so a failing AI isn't called in a loop.
+    private var summaryFailed: Set<UUID> = []
+    /// Each summary is its own AI call; a few at a time is plenty.
+    static let maxConcurrentSummaries = 2
     func fillMissingSummaries() {
         guard let chat = settings.selectedChatRowID, settings.hasConsent(chat),
               !settings.pausedChats.contains(chat) else { return }
         for topic in topics where topic.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !summarizing.contains(topic.id) {
+            && !summarizing.contains(topic.id) && !summaryFailed.contains(topic.id) {
+            guard summarizing.count < Self.maxConcurrentSummaries else { return }
             summarize(topic.id, chat: chat)
         }
     }
@@ -687,11 +731,14 @@ final class WeftViewModel {
             let raw = try? await client.complete(systemPrompt: system, userPrompt: "TOPIC: \(topic.title)\n\n" + transcript, purpose: .summary)
             guard let self else { return }
             self.summarizing.remove(id)
-            guard mySession == self.session, let raw,
-                  let index = self.topics.firstIndex(where: { $0.id == id }),
+            guard mySession == self.session else { return }
+            // Next one in line, whatever happened to this one.
+            defer { self.fillMissingSummaries() }
+            guard let raw else { self.summaryFailed.insert(id); return }
+            guard let index = self.topics.firstIndex(where: { $0.id == id }),
                   self.topics[index].summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             let sentence = TopicSegmenter.stripFences(raw).trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "\"")))
-            guard !sentence.isEmpty else { return }
+            guard !sentence.isEmpty else { self.summaryFailed.insert(id); return }
             self.topics[index].summary = String(sentence.prefix(300))
             self.saveCache(chat: chat, filedThrough: Self.checkpoint(messages: self.messages, pending: self.pendingMessageIDs))
         }
@@ -836,10 +883,8 @@ final class WeftViewModel {
             // Anything the AI skipped joins the thread of the message before
             // it (or after, at the very start), so the loop always progresses.
             if placed < chunk.count {
-                for m in chunk where !Set(topics.flatMap(\.messageIds)).contains(m.id) {
-                    let target = topics.firstIndex(where: { $0.messageIds.contains { $0 < m.id } })
-                        ?? topics.firstIndex(where: { $0.messageIds.contains { $0 > m.id } })
-                    if let target {
+                for m in chunk where !topics.contains(where: { $0.messageIds.contains(m.id) }) {
+                    if let target = TopicEditor.neighborTopicIndex(for: m.id, in: topics) {
                         topics[target].messageIds.append(m.id)
                         topics[target].messageIds.sort()
                     }
@@ -1243,6 +1288,22 @@ final class WeftViewModel {
                 }
                 filed.formUnion(stillWaiting)
             }
+            // Skipped again (a lone photo, a bare emoji…)? After a few
+            // tries it joins the topic of the message before it, so the
+            // same batch isn't sent to the AI every few seconds for ever.
+            var forced = Set<Int64>()
+            for id in batchIDs.sorted() where !filed.contains(id) && pendingMessageIDs.contains(id) {
+                let attempts = (filingAttempts[id] ?? 0) + 1
+                filingAttempts[id] = attempts
+                guard attempts >= Self.maxFilingAttempts else { continue }
+                if let target = TopicEditor.neighborTopicIndex(for: id, in: base) {
+                    base[target].messageIds.append(id)
+                } else {
+                    base.append(Topic(id: UUID(), title: TopicEditor.title("", fallback: ""), summary: "", messageIds: [id]))
+                }
+                forced.insert(id)
+            }
+            for id in filed.union(forced) { filingAttempts[id] = nil }
             for i in base.indices { base[i].messageIds.sort() }
             followUpQueue.subtract(batchIDs)
 
@@ -1255,7 +1316,7 @@ final class WeftViewModel {
 
             // Messages Claude skipped, or that arrived during the call, stay
             // where they're shown and get another pass.
-            let stillPending = pendingMessageIDs.subtracting(filed)
+            let stillPending = pendingMessageIDs.subtracting(filed).subtracting(forced)
             topics = base
             pendingMessageIDs = []
             let provisional = provisionalTopic
@@ -1282,7 +1343,7 @@ final class WeftViewModel {
         } catch {
             guard mySession == session else { return }
             topicsStale = true
-            showNotice("Couldn't sort new messages: \(error.localizedDescription)", action: "Retry") { [weak self] in
+            showNotice(String(localized: "Couldn't sort new messages: \(error.localizedDescription)"), action: String(localized: "Retry")) { [weak self] in
                 self?.scheduleAutoSort(after: 0)
             }
         }
@@ -1406,7 +1467,7 @@ final class WeftViewModel {
         // keep this message and the replies to it in the thread.
         if let topic = selectedTopic {
             if settings.prefixThreadReplies {
-                trimmed = "Re: \(topic.title) — \(trimmed)"
+                trimmed = String(localized: "Re: \(topic.title) — \(trimmed)", comment: "A reply sent from inside a topic: topic title, then the message")
             }
             noteReplySent(inTopic: topic.id, text: trimmed)
         } else {
@@ -1415,14 +1476,15 @@ final class WeftViewModel {
         isSending = true
         defer { isSending = false }
         do {
-            // Detached: osascript is synchronous and must not block the UI.
-            try await Task.detached {
+            // osascript is synchronous: run it off the UI and off the
+            // concurrency pool.
+            try await BlockingWork.run {
                 if let groupChatGuid, !groupChatGuid.isEmpty {
                     try MessageSender.send(text: trimmed, toChat: groupChatGuid, service: groupService)
                 } else {
                     try MessageSender.send(text: trimmed, to: handle)
                 }
-            }.value
+            }
             await pollOnce() // pick up our own message quickly
             scrollToken += 1
             return true

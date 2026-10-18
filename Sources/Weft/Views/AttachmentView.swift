@@ -15,7 +15,7 @@ struct AttachmentView: View {
     var body: some View {
         Group {
             if attachment.isMissing {
-                chip(symbol: "icloud.and.arrow.down", text: "\(attachment.name) — not downloaded to this Mac yet")
+                chip(symbol: "icloud.and.arrow.down", text: String(localized: "\(attachment.name) — not downloaded to this Mac yet"))
             } else if (attachment.isImage || attachment.isVideo) && previewFailed {
                 HStack(spacing: 8) {
                     chip(symbol: attachment.isVideo ? "film" : "photo", text: attachment.name)
@@ -43,7 +43,7 @@ struct AttachmentView: View {
                 .frame(maxWidth: 240, maxHeight: 240)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .onTapGesture { NSWorkspace.shared.open(attachment.url) }
-                .accessibilityLabel(attachment.isVideo ? "Video: \(attachment.name)" : "Photo: \(attachment.name)")
+                .accessibilityLabel(attachment.isVideo ? String(localized: "Video: \(attachment.name)") : String(localized: "Photo: \(attachment.name)"))
                 .accessibilityAddTraits(.isButton)
                 .task(id: "\(attachment.id)-\(retry)") { await loadThumbnail() }
             } else {
@@ -132,7 +132,7 @@ struct LinkPreviewCard: View {
                 NSPasteboard.general.setString(link.url.absoluteString, forType: .string)
             }
         }
-        .accessibilityLabel("Link: \(link.title.isEmpty ? link.site : link.title), \(link.site)")
+        .accessibilityLabel(String(localized: "Link: \(link.title.isEmpty ? link.site : link.title), \(link.site)"))
         .accessibilityAddTraits(.isLink)
         .task(id: link.imagePath) {
             guard let path = link.imagePath else { return }

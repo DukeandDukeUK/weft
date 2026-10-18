@@ -32,7 +32,18 @@ enum CallPurpose: String, Sendable, Codable {
 
     /// On-screen name (the stored names above stay as they are so older
     /// logs still load).
-    var label: String { self == .openLoops ? "Follow-ups" : rawValue }
+    /// Shown in Settings; the raw value is what the log file stores.
+    var label: String {
+        switch self {
+        case .fullSort: return String(localized: "Full sort", comment: "Kind of AI call")
+        case .filing: return String(localized: "Filing new messages", comment: "Kind of AI call")
+        case .history: return String(localized: "Sorting older history", comment: "Kind of AI call")
+        case .openLoops: return String(localized: "Follow-ups", comment: "Kind of AI call")
+        case .connectionTest: return String(localized: "Connection test", comment: "Kind of AI call")
+        case .summary: return String(localized: "Topic summary", comment: "Kind of AI call")
+        case .other: return String(localized: "Other", comment: "Kind of AI call")
+        }
+    }
 }
 
 struct TokenLogEntry: Identifiable, Sendable, Codable, Hashable {
