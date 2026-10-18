@@ -6,10 +6,23 @@ struct WeftApp: App {
     /// Sparkle: checks the appcast (SUFeedURL in Info.plist) for new
     /// versions, and offers to download and install them.
     private let updaterController = SPUStandardUpdaterController(
-        startingUpdater: true,
+        startingUpdater: false,
         updaterDelegate: nil,
         userDriverDelegate: nil
     )
+
+    init() {
+        // Look for a new version every time Weft opens, not just once a day
+        // (Sparkle's own schedule). Sparkle's documented way: right after
+        // starting the updater, and only if automatic checks are on. Quiet:
+        // nothing shows unless an update is found, and it then follows your
+        // install preference (ask, or install when you quit).
+        updaterController.startUpdater()
+        let updater = updaterController.updater
+        if updater.automaticallyChecksForUpdates {
+            updater.checkForUpdatesInBackground()
+        }
+    }
 
     var body: some Scene {
         // One window: every window would share the selected recipient, so a
