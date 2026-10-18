@@ -19,6 +19,7 @@ struct WeftApp: App {
         // install preference (ask, or install when you quit).
         updaterController.startUpdater()
         let updater = updaterController.updater
+        Updates.updater = updater
         if updater.automaticallyChecksForUpdates {
             updater.checkForUpdatesInBackground()
         }

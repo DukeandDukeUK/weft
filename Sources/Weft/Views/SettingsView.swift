@@ -38,6 +38,8 @@ struct SettingsView: View {
             }
             .onChange(of: viewModel.settings.dockBadge) { _, _ in viewModel.updateBadge() }
 
+            UpdateSettingsSection()
+
             Section("Appearance") {
                 Picker("Appearance", selection: Bindable(viewModel.settings).appearance) {
                     Text("Automatic").tag("system")
