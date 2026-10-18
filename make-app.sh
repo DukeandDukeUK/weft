@@ -50,13 +50,14 @@ cp "$BIN" "$APP_DIR/Contents/MacOS/$EXEC_NAME"
 # Drop debugging info (it lists build folders); the app doesn't need it.
 strip -S -x "$APP_DIR/Contents/MacOS/$EXEC_NAME"
 
-# Localizations. SwiftPM compiles the string catalog into a resource bundle;
-# the app looks strings up in its own bundle, so the .lproj folders move
-# into Contents/Resources. (Without them every string falls back to its
-# English key, so a missing bundle only ever costs translations.)
-RESOURCE_BUNDLE="$BIN_DIR/Weft_Weft.bundle"
-if [ -d "$RESOURCE_BUNDLE" ]; then
-    find "$RESOURCE_BUNDLE" -maxdepth 2 -name "*.lproj" -type d -exec cp -R {} "$APP_DIR/Contents/Resources/" \;
+# Localizations. `swift build` doesn't compile string catalogs (its resource
+# bundle comes out empty), so compile the catalog here with Xcode's own tool,
+# straight into Contents/Resources where the app looks strings up. Only
+# translated languages produce .lproj folders; English needs none, because
+# every string falls back to its English key.
+CATALOG="Sources/Weft/Resources/Localizable.xcstrings"
+if [ -f "$CATALOG" ]; then
+    xcrun xcstringstool compile "$CATALOG" --output-directory "$APP_DIR/Contents/Resources"
 fi
 
 # Sparkle (automatic updates). ditto keeps the framework's internal symlinks.
