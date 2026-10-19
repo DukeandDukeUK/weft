@@ -349,30 +349,35 @@ enum CLIRunner {
         proc.standardOutput = outPipe
         proc.standardError = errPipe
 
-        // Output is collected as it arrives, so a full pipe can't stall the
-        // child. The wait ends when the child EXITS, not when the pipes
-        // close: a helper process the tool leaves behind can keep the pipe
-        // open long after the answer is complete, which used to look like
-        // a ten-minute hang.
-        let output = OutputCollector()
-        output.attach(stdout: outPipe.fileHandleForReading, stderr: errPipe.fileHandleForReading)
-        let exited = DispatchSemaphore(value: 0)
-        proc.terminationHandler = { _ in exited.signal() }
         do {
             try proc.run()
         } catch {
-            _ = output.finish()
             throw LLMClient.ClientError.launchFailed(error.localizedDescription)
         }
-        if exited.wait(timeout: .now() + LLMClient.timeout) == .timedOut {
+
+        // Drain both pipes concurrently so a full buffer can't stall the
+        // child. (0.4.3 switched this to reading as data arrived and waiting
+        // for the process to exit; on 2026-10-19 that left Codex runs idle
+        // for 5+ minutes while the same call from a terminal took 4 seconds.
+        // This is the approach that ran reliably through 0.4.2.)
+        var outData = Data()
+        var errData = Data()
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global().async {
+            outData = outPipe.fileHandleForReading.readDataToEndOfFile()
+            group.leave()
+        }
+        group.enter()
+        DispatchQueue.global().async {
+            errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+            group.leave()
+        }
+        if group.wait(timeout: .now() + LLMClient.timeout) == .timedOut {
             proc.terminate()
-            _ = exited.wait(timeout: .now() + 5)
-            _ = output.finish()
             throw LLMClient.ClientError.timedOut
         }
-        // The last of the output can land just after exit: give it a moment.
-        output.waitForEOF(seconds: 2)
-        let (outData, errData) = output.finish()
+        proc.waitUntilExit()
 
         let out = String(data: outData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let err = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
