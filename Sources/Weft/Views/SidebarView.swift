@@ -10,21 +10,22 @@ struct SidebarView: View {
     @State private var showDone = false
     @State private var showSnoozed = false
     @State private var renameText = ""
+    /// The open conversation, as the list's own selection. Letting the list
+    /// handle clicks (no click handler on the rows) is what lets it start a
+    /// drag to reorder, the way Finder's and Mail's sidebars work.
+    @State private var chatSelection: Int64?
 
     var body: some View {
-        List {
-            // Every added conversation, in your order (drag one onto another,
-            // or right-click → Move Up / Move Down).
+        List(selection: $chatSelection) {
+            // Every added conversation, in your order (drag to reorder, or
+            // right-click → Move Up / Move Down).
             // Right-click a conversation for more options.
             Section {
                 ForEach(viewModel.followedChats) { chat in
-                    // A tap, not a Button: a Button takes the mouse press,
-                    // which stops the list from starting a drag to reorder.
                     let chatPalette = ConversationColors.palette(forChat: chat.id, settings: viewModel.settings)
                     ConversationRow(
                         isSelected: viewModel.settings.selectedChatRowID == chat.id,
-                        highlight: chatPalette.soft,
-                        action: { Task { await viewModel.selectChat(chat) } }
+                        highlight: chatPalette.soft
                     ) {
                         Label {
                             Text(ContactNames.shared.shortDisplay(chat.participants)).lineLimit(1)
@@ -53,15 +54,7 @@ struct SidebarView: View {
                                 .help(String(localized: "^[\(count) new message](inflect: true)"))
                         }
                     }
-                    // Drag a conversation onto another to put it there. (The
-                    // list's own reordering never started: the row's click
-                    // handler took the mouse press first.)
-                    .draggable(String(chat.id))
-                    .dropDestination(for: String.self) { items, _ in
-                        guard let id = items.first.flatMap(Int64.init), id != chat.id else { return false }
-                        withAnimation { viewModel.moveConversation(id, before: chat.id) }
-                        return true
-                    }
+                    .tag(chat.id)
                     .contextMenu {
                         Button("Open") { Task { await viewModel.selectChat(chat) } }
                         Button("Open in Messages") { viewModel.openInMessages(chat) }
@@ -97,6 +90,12 @@ struct SidebarView: View {
                             Task { await viewModel.removeConversation(chat.id) }
                         }
                     }
+                }
+                .onMove { from, to in
+                    // Reorder what's shown; keep any not-shown ids at the end.
+                    var ids = viewModel.followedChats.map(\.id)
+                    ids.move(fromOffsets: from, toOffset: to)
+                    viewModel.settings.followedChats = ids + viewModel.settings.followedChats.filter { !ids.contains($0) }
                 }
             } header: {
                 HStack {
@@ -237,6 +236,21 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
+        // The list's selection highlight (the open conversation) in that
+        // conversation's own colour.
+        .tint(palette.tint)
+        // Clicking a conversation selects it in the list; open it. And keep
+        // the list in step when a conversation opens some other way (⌘1–9,
+        // a search result, removing the open one).
+        .onAppear { chatSelection = viewModel.settings.selectedChatRowID }
+        .onChange(of: chatSelection) { _, id in
+            guard let id, id != viewModel.settings.selectedChatRowID,
+                  let chat = viewModel.followedChats.first(where: { $0.id == id }) else { return }
+            Task { await viewModel.selectChat(chat) }
+        }
+        .onChange(of: viewModel.settings.selectedChatRowID) { _, id in
+            if chatSelection != id { chatSelection = id }
+        }
         .alert("Rename Topic", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Topic name", text: $renameText)
             Button("Rename") {
@@ -317,13 +331,12 @@ struct SidebarView: View {
     }
 }
 
-/// Conversation row: same look as SidebarRow, but opened with a tap so the
-/// list can drag it to reorder.
+/// Conversation row: same look as SidebarRow. No click handler: the list's
+/// own selection opens it, which also lets the list drag it to reorder.
 private struct ConversationRow<Content: View>: View {
     let isSelected: Bool
     /// Selection colour: this conversation's own.
     let highlight: Color
-    let action: () -> Void
     @ViewBuilder let content: () -> Content
 
     var body: some View {
@@ -332,18 +345,14 @@ private struct ConversationRow<Content: View>: View {
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isSelected ? highlight : Color.clear)
-            )
+            // The list draws the selection highlight itself (tinted with the
+            // conversation's colour, see `.tint` on the list), so no fill here.
             .fontWeight(isSelected ? .semibold : .regular)
-            .onTapGesture(perform: action)
             .listRowInsets(EdgeInsets(top: 1, leading: 4, bottom: 1, trailing: 4))
             // VoiceOver: one element, activates like a button. Keyboard:
             // Conversations menu, ⌘1–⌘9.
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-            .accessibilityAction { action() }
     }
 }
 
