@@ -1079,6 +1079,27 @@ final class WeftViewModel {
 
     /// Stop following a conversation. Its saved threads are kept, so adding
     /// it back later is instant.
+    /// Reorder: put a conversation just before another (dragged onto it), or
+    /// one place up or down (right-click → Move Up / Move Down).
+    func moveConversation(_ id: Int64, before target: Int64) {
+        var ids = settings.followedChats
+        guard id != target, let from = ids.firstIndex(of: id) else { return }
+        ids.remove(at: from)
+        let to = ids.firstIndex(of: target) ?? ids.count
+        ids.insert(id, at: to)
+        settings.followedChats = ids
+    }
+
+    func moveConversation(_ id: Int64, by offset: Int) {
+        var ids = settings.followedChats
+        guard let from = ids.firstIndex(of: id) else { return }
+        let to = min(max(from + offset, 0), ids.count - 1)
+        guard to != from else { return }
+        ids.remove(at: from)
+        ids.insert(id, at: to)
+        settings.followedChats = ids
+    }
+
     func removeConversation(_ id: Int64) async {
         settings.followedChats.removeAll { $0 == id }
         // Its topics and follow-ups go too: added back later, it's sorted

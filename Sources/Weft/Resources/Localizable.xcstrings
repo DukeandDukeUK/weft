@@ -161,6 +161,8 @@
     "Model name": {},
     "Model server returned HTTP %lld: %@": {},
     "More": {},
+    "Move Down": {},
+    "Move Up": {},
     "Move": {},
     "Move Message": {},
     "Move to New Topic": {},

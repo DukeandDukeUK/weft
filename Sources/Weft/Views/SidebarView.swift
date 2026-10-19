@@ -13,7 +13,8 @@ struct SidebarView: View {
 
     var body: some View {
         List {
-            // Every added conversation, in your order (drag to reorder).
+            // Every added conversation, in your order (drag one onto another,
+            // or right-click → Move Up / Move Down).
             // Right-click a conversation for more options.
             Section {
                 ForEach(viewModel.followedChats) { chat in
@@ -52,9 +53,23 @@ struct SidebarView: View {
                                 .help(String(localized: "^[\(count) new message](inflect: true)"))
                         }
                     }
+                    // Drag a conversation onto another to put it there. (The
+                    // list's own reordering never started: the row's click
+                    // handler took the mouse press first.)
+                    .draggable(String(chat.id))
+                    .dropDestination(for: String.self) { items, _ in
+                        guard let id = items.first.flatMap(Int64.init), id != chat.id else { return false }
+                        withAnimation { viewModel.moveConversation(id, before: chat.id) }
+                        return true
+                    }
                     .contextMenu {
                         Button("Open") { Task { await viewModel.selectChat(chat) } }
                         Button("Open in Messages") { viewModel.openInMessages(chat) }
+                        Divider()
+                        Button("Move Up") { withAnimation { viewModel.moveConversation(chat.id, by: -1) } }
+                            .disabled(viewModel.followedChats.first?.id == chat.id)
+                        Button("Move Down") { withAnimation { viewModel.moveConversation(chat.id, by: 1) } }
+                            .disabled(viewModel.followedChats.last?.id == chat.id)
                         Divider()
                         Button(viewModel.isPaused(chat.id) ? "Resume Sorting" : "Pause Sorting") {
                             viewModel.setPaused(chat.id, !viewModel.isPaused(chat.id))
@@ -82,12 +97,6 @@ struct SidebarView: View {
                             Task { await viewModel.removeConversation(chat.id) }
                         }
                     }
-                }
-                .onMove { from, to in
-                    // Reorder what's shown; keep any not-shown ids at the end.
-                    var ids = viewModel.followedChats.map(\.id)
-                    ids.move(fromOffsets: from, toOffset: to)
-                    viewModel.settings.followedChats = ids + viewModel.settings.followedChats.filter { !ids.contains($0) }
                 }
             } header: {
                 HStack {

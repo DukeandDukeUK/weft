@@ -971,6 +971,25 @@ final class WeftTests: XCTestCase {
         XCTAssertEqual(TextScale.baseSize(.body) * 1.3, 16.9, accuracy: 0.01)
     }
 
+    // MARK: - 0.4.7 reordering conversations
+
+    func testReorderConversations() {
+        let vm = WeftViewModel()
+        let before = vm.settings.followedChats
+        defer { vm.settings.followedChats = before }
+        vm.settings.followedChats = [1, 2, 3, 4]
+        vm.moveConversation(4, before: 2)
+        XCTAssertEqual(vm.settings.followedChats, [1, 4, 2, 3], "dragged onto 2: goes just before it")
+        vm.moveConversation(1, before: 3)
+        XCTAssertEqual(vm.settings.followedChats, [4, 2, 1, 3])
+        vm.moveConversation(3, by: -1)
+        XCTAssertEqual(vm.settings.followedChats, [4, 2, 3, 1])
+        vm.moveConversation(4, by: -1)
+        XCTAssertEqual(vm.settings.followedChats, [4, 2, 3, 1], "already at the top")
+        vm.moveConversation(1, by: 1)
+        XCTAssertEqual(vm.settings.followedChats, [4, 2, 3, 1], "already at the bottom")
+    }
+
     // MARK: - 0.3.3 removing a conversation forgets it
 
     func testRemovingConversationForgetsItsTopics() async throws {
