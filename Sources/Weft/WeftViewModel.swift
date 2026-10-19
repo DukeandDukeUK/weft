@@ -275,6 +275,11 @@ final class WeftViewModel {
     }
 
     func selectChat(_ chat: ChatInfo) async {
+        // Already open and loaded: nothing to do. Reopening it (startup
+        // running again, ⌘1–9, a click on the open conversation) used to reset
+        // the view to All messages, so a reply typed afterwards went out
+        // without its "Re: <topic>" tag.
+        if chat.id == settings.selectedChatRowID, !messages.isEmpty { return }
         stopPolling()
         startNewSession()
         // Opened something else before this finished loading? Then this

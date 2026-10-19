@@ -971,6 +971,26 @@ final class WeftTests: XCTestCase {
         XCTAssertEqual(TextScale.baseSize(.body) * 1.3, 16.9, accuracy: 0.01)
     }
 
+    // MARK: - 0.4.10 staying in the topic you're in
+
+    // Reopening the conversation that's already open (startup again, ⌘1–9)
+    // must not throw you out of the topic you're replying in.
+    func testReopeningOpenConversationKeepsTheTopic() async {
+        let vm = WeftViewModel()
+        let before = vm.settings.selectedChatRowID
+        defer { vm.settings.selectedChatRowID = before }
+        let chat = ChatInfo(id: 9301, participants: "x", messageCount: 1, lastDate: nil, lastSnippet: nil)
+        vm.chats = [chat]
+        vm.settings.selectedChatRowID = 9301
+        let topic = Topic(id: UUID(), title: "TT RS search", summary: "", messageIds: [1])
+        vm.messages = [msg(1)]
+        vm.topics = [topic]
+        vm.sidebarSelection = .topic(topic.id)
+        await vm.selectChat(chat)
+        XCTAssertEqual(vm.sidebarSelection, .topic(topic.id), "reopening the open conversation threw you out of the topic")
+        XCTAssertEqual(vm.selectedTopic?.id, topic.id)
+    }
+
     // MARK: - 0.4.7 reordering conversations
 
     func testReorderConversations() {
