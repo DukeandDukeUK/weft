@@ -28,10 +28,22 @@ struct DetailView: View {
                 // Layering the header over the scroll view made macOS draw
                 // its own toolbar separator partway down the conversation.
                 VStack(spacing: 0) {
-                    if viewModel.selectedTopic != nil || viewModel.notice != nil || viewModel.betterLocalModel != nil {
+                    if viewModel.selectedTopic != nil || viewModel.notice != nil || viewModel.betterLocalModel != nil
+                        || (viewModel.selectedTopic == nil && viewModel.returnTopic != nil) {
                         VStack(spacing: 8) {
                             if let topic = viewModel.selectedTopic {
                                 ThreadHeader(topic: topic) { viewModel.sidebarSelection = .all }
+                            } else if let back = viewModel.returnTopic {
+                                // Came back to this conversation: one click
+                                // returns to the topic you were in.
+                                Button { viewModel.goBackToTopic() } label: {
+                                    Label(String(localized: "Back to “\(back.title)”"), systemImage: "arrow.uturn.backward")
+                                        .scaledFont(.callout, weight: .medium)
+                                        .lineLimit(1)
+                                }
+                                .glassButton()
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .help(String(localized: "Open the topic you were in before switching conversations"))
                             }
                             notices
                         }

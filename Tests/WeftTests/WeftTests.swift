@@ -1003,6 +1003,33 @@ final class WeftTests: XCTestCase {
         XCTAssertNil(ConversationBackgrounds.isDark(forChat: "+15550000002", in: root), "no preview: follow the Mac")
     }
 
+    // MARK: - 0.4.13 "Back to <topic>" after switching conversations
+
+    func testBackToTopicOfferAfterSwitching() async throws {
+        let a: Int64 = 9501, b: Int64 = 9502
+        let path = try fixtureDB([(1, a, "from A", nil, false), (2, b, "from B", nil, false)])
+        let topicA = Topic(id: UUID(), title: "TT RS search", summary: "", messageIds: [1])
+        try SegmentationCache.save(CachedAnalysis(messageCount: 1, newestRowId: 1, generatedAt: Date(), topics: [topicA], loops: []), chatId: a)
+        let vm = WeftViewModel()
+        vm.reader = ChatDBReader(path: path)
+        vm.background.reader = vm.reader
+        let s = vm.settings
+        let before = (s.followedChats, s.selectedChatRowID, s.selectedHandleId)
+        defer { s.followedChats = before.0; s.selectedChatRowID = before.1; s.selectedHandleId = before.2 }
+        let chatA = ChatInfo(id: a, participants: "x", messageCount: 1, lastDate: nil, lastSnippet: nil)
+        let chatB = ChatInfo(id: b, participants: "y", messageCount: 1, lastDate: nil, lastSnippet: nil)
+        await vm.selectChat(chatA)
+        vm.sidebarSelection = .topic(topicA.id)
+        await vm.selectChat(chatB)
+        XCTAssertNil(vm.returnTopic, "nothing to go back to in B yet")
+        await vm.selectChat(chatA)
+        XCTAssertEqual(vm.sidebarSelection, .all, "never reopens the topic by itself")
+        XCTAssertEqual(vm.returnTopic?.id, topicA.id, "offers the way back")
+        vm.goBackToTopic()
+        XCTAssertEqual(vm.sidebarSelection, .topic(topicA.id))
+        XCTAssertNil(vm.returnTopicID, "offer gone once used")
+    }
+
     // MARK: - 0.4.12 dark or light per conversation
 
     func testConversationStyleChoice() {

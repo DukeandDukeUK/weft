@@ -67,7 +67,24 @@ final class WeftViewModel {
     var loops: [OpenLoop] = []
 
     // UI state
-    var sidebarSelection: SidebarSelection? = .all
+    var sidebarSelection: SidebarSelection? = .all {
+        // Opening a topic yourself answers the "Back to …" offer.
+        didSet { if case .topic = sidebarSelection { returnTopicID = nil } }
+    }
+
+    /// The topic you last had open in each conversation (this session), so
+    /// coming back can offer a one-click way back into it.
+    private var lastTopicByChat: [Int64: UUID] = [:]
+    /// Offered on return to a conversation: "Back to <topic>". Weft never
+    /// reopens it by itself: a reply inside a topic gets its "Re:" tag, and
+    /// that should always be your choice.
+    var returnTopicID: UUID?
+    var returnTopic: Topic? { returnTopicID.flatMap { id in topics.first { $0.id == id } } }
+
+    func goBackToTopic() {
+        guard let topic = returnTopic else { return }
+        sidebarSelection = .topic(topic.id)
+    }
     var searchText = ""
     var showChatPicker = false
     var showSettings = false
@@ -297,6 +314,11 @@ final class WeftViewModel {
         // the view to All messages, so a reply typed afterwards went out
         // without its "Re: <topic>" tag.
         if chat.id == settings.selectedChatRowID, !messages.isEmpty { return }
+        // Remember the topic you're leaving, for the "Back to …" offer.
+        if let leaving = settings.selectedChatRowID, case .topic(let id)? = sidebarSelection {
+            lastTopicByChat[leaving] = id
+        }
+        returnTopicID = lastTopicByChat[chat.id]
         backgroundPhoto = nil
         backgroundIsDark = nil
         loadBackground(for: chat)
@@ -1524,6 +1546,7 @@ final class WeftViewModel {
     func send(_ text: String) async -> Bool {
         var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, canSend, !isSending else { return false }
+        returnTopicID = nil
         let handle = settings.selectedHandleId
         let groupChatGuid = isGroupChat ? selectedChat?.guid : nil
         let groupService = selectedChat?.service ?? ""
