@@ -37,6 +37,8 @@ final class WeftViewModel {
 
     // Data
     var chats: [ChatInfo] = []
+    /// The open conversation's photo background from Messages, if it has one.
+    var backgroundPhoto: NSImage?
     var messages: [ChatMessage] = [] {
         didSet { dateByID = Dictionary(messages.map { ($0.id, $0.date) }, uniquingKeysWith: { a, _ in a }) }
     }
@@ -280,6 +282,8 @@ final class WeftViewModel {
         // the view to All messages, so a reply typed afterwards went out
         // without its "Re: <topic>" tag.
         if chat.id == settings.selectedChatRowID, !messages.isEmpty { return }
+        backgroundPhoto = nil
+        loadBackground(for: chat)
         stopPolling()
         startNewSession()
         // Opened something else before this finished loading? Then this
@@ -985,7 +989,23 @@ final class WeftViewModel {
         Notifier.shared.setBadge(total, enabled: settings.dockBadge)
     }
 
+    /// Read the conversation's photo background (off the main thread; the
+    /// image is a few MB). Runs on open and when Weft comes to the front, so a
+    /// background changed in Messages shows up.
+    func loadBackground(for chat: ChatInfo) {
+        let identifier = ConversationBackgrounds.identifier(fromGUID: chat.guid)
+        let chatID = chat.id
+        Task.detached {
+            let image = ConversationBackgrounds.imageURL(forChat: identifier).flatMap { NSImage(contentsOf: $0) }
+            await MainActor.run { [weak self] in
+                guard let self, self.settings.selectedChatRowID == chatID else { return }
+                self.backgroundPhoto = image
+            }
+        }
+    }
+
     private func didBecomeActive() {
+        if let open = selectedChat { loadBackground(for: open) }
         guard let chat = settings.selectedChatRowID else { return }
         settings.markViewed(chat: chat, through: lastSeenRowID)
         openUnread = 0

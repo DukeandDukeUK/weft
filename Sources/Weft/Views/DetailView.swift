@@ -63,8 +63,21 @@ struct DetailView: View {
             }
         }
         .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
-        // The conversation's own hue, faintly, so each one has its own air.
-        .background(palette.canvas.ignoresSafeArea())
+        // The conversation's own hue, faintly, so each one has its own air;
+        // or its photo background from Messages, at full strength (the
+        // bubbles are solid colours, so they stay readable on top).
+        .background {
+            ZStack {
+                palette.canvas
+                if let photo = viewModel.backgroundPhoto {
+                    Image(nsImage: photo)
+                        .resizable()
+                        .scaledToFill()
+                        .clipped()
+                }
+            }
+            .ignoresSafeArea()
+        }
         .animation(.easeInOut(duration: 0.25), value: palette.hueIndex)
     }
 

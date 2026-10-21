@@ -971,6 +971,30 @@ final class WeftTests: XCTestCase {
         XCTAssertEqual(TextScale.baseSize(.body) * 1.3, 16.9, accuracy: 0.01)
     }
 
+    // MARK: - 0.4.11 photo backgrounds from Messages
+
+    func testPhotoBackgroundIsFoundForItsConversation() throws {
+        let root = scratch.appendingPathComponent("Channels")
+        func channel(_ name: String, identifier: String, image: String?) throws {
+            let info = root.appending(path: "\(name)/channelVersions/1")
+            try FileManager.default.createDirectory(at: info, withIntermediateDirectories: true)
+            let archive = try NSKeyedArchiver.archivedData(withRootObject: ["chat": identifier] as NSDictionary, requiringSecureCoding: false)
+            try archive.write(to: info.appending(path: "channelInfo.plist"))
+            guard let image else { return }
+            let layers = root.appending(path: "\(name)/channelPosterVersions/1/provider/configurations/x/versions/0/contents/y/output.layerStack")
+            try FileManager.default.createDirectory(at: layers, withIntermediateDirectories: true)
+            try Data([0x89, 0x50]).write(to: layers.appending(path: "portrait-layer_foreground.HEIC"))
+            try Data([0x89, 0x50]).write(to: layers.appending(path: image))
+        }
+        try channel("A", identifier: "+15550000001", image: "portrait-layer_background.HEIC")
+        try channel("B", identifier: "+15550000002", image: nil)          // a built-in style: no picture
+        XCTAssertEqual(ConversationBackgrounds.identifier(fromGUID: "iMessage;-;+15550000001"), "+15550000001")
+        XCTAssertEqual(ConversationBackgrounds.imageURL(forChat: "+15550000001", in: root)?.lastPathComponent,
+                       "portrait-layer_background.HEIC", "the background layer, not the foreground")
+        XCTAssertNil(ConversationBackgrounds.imageURL(forChat: "+15550000002", in: root))
+        XCTAssertNil(ConversationBackgrounds.imageURL(forChat: "+15559999999", in: root))
+    }
+
     // MARK: - 0.4.10 staying in the topic you're in
 
     // Reopening the conversation that's already open (startup again, ⌘1–9)
