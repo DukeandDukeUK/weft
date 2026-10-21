@@ -39,6 +39,21 @@ final class WeftViewModel {
     var chats: [ChatInfo] = []
     /// The open conversation's photo background from Messages, if it has one.
     var backgroundPhoto: NSImage?
+    /// Whether Messages shows the open conversation dark (true) or light
+    /// (false) to suit its background; nil = follow the Mac.
+    var backgroundIsDark: Bool?
+
+    /// The open conversation's dark/light style: your choice for it
+    /// (right-click → Appearance), else Messages' (if matching is on), else
+    /// nil = Weft's normal appearance.
+    var conversationIsDark: Bool? {
+        guard let chat = settings.selectedChatRowID else { return nil }
+        switch settings.appearance(forChat: chat) {
+        case "dark": return true
+        case "light": return false
+        default: return settings.matchMessagesStyle ? backgroundIsDark : nil
+        }
+    }
     var messages: [ChatMessage] = [] {
         didSet { dateByID = Dictionary(messages.map { ($0.id, $0.date) }, uniquingKeysWith: { a, _ in a }) }
     }
@@ -283,6 +298,7 @@ final class WeftViewModel {
         // without its "Re: <topic>" tag.
         if chat.id == settings.selectedChatRowID, !messages.isEmpty { return }
         backgroundPhoto = nil
+        backgroundIsDark = nil
         loadBackground(for: chat)
         stopPolling()
         startNewSession()
@@ -997,9 +1013,11 @@ final class WeftViewModel {
         let chatID = chat.id
         Task.detached {
             let image = ConversationBackgrounds.imageURL(forChat: identifier).flatMap { NSImage(contentsOf: $0) }
+            let dark = ConversationBackgrounds.isDark(forChat: identifier)
             await MainActor.run { [weak self] in
                 guard let self, self.settings.selectedChatRowID == chatID else { return }
                 self.backgroundPhoto = image
+                self.backgroundIsDark = dark
             }
         }
     }

@@ -85,6 +85,22 @@ struct SidebarView: View {
                                 ))
                             }
                         }
+                        Menu("Appearance") {
+                            let chosen = viewModel.settings.appearance(forChat: chat.id)
+                            Toggle("Automatic (as in Messages)", isOn: Binding(
+                                get: { chosen == nil },
+                                set: { if $0 { viewModel.settings.setAppearance(nil, forChat: chat.id) } }
+                            ))
+                            Divider()
+                            Toggle("Light", isOn: Binding(
+                                get: { chosen == "light" },
+                                set: { if $0 { viewModel.settings.setAppearance("light", forChat: chat.id) } }
+                            ))
+                            Toggle("Dark", isOn: Binding(
+                                get: { chosen == "dark" },
+                                set: { if $0 { viewModel.settings.setAppearance("dark", forChat: chat.id) } }
+                            ))
+                        }
                         Divider()
                         Button("Remove from Weft", role: .destructive) {
                             Task { await viewModel.removeConversation(chat.id) }

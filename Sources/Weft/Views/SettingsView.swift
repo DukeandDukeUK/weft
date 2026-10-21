@@ -56,6 +56,10 @@ struct SettingsView: View {
                 Text("Also in the View menu: Bigger Text ⌘+, Smaller Text ⌘−, Default Size ⌘0.")
                     .scaledFont(.caption)
                     .foregroundStyle(.secondary)
+                Toggle("Match each conversation's dark or light style from Messages", isOn: Bindable(viewModel.settings).matchMessagesStyle)
+                Text("Messages can show a conversation dark or light to suit its background. With this on, Weft's window does the same while that conversation is open, then goes back to the appearance above.")
+                    .scaledFont(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             AISettingsSection(viewModel: viewModel)

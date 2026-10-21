@@ -23,20 +23,46 @@ enum ConversationBackgrounds {
 
     /// The photo background for a conversation, or nil.
     static func imageURL(forChat identifier: String, in directory: URL = channelsDirectory) -> URL? {
+        guard let channel = channel(forChat: identifier, in: directory),
+              let poster = newestNumbered(in: channel.appending(path: "channelPosterVersions")) else { return nil }
+        return newestImage(under: poster)
+    }
+
+    /// Whether Messages shows this conversation dark (true) or light (false)
+    /// to suit its background; nil when it just follows the Mac's setting.
+    /// Read from Messages' saved preview of the background.
+    static func isDark(forChat identifier: String, in directory: URL = channelsDirectory) -> Bool? {
+        guard let channel = channel(forChat: identifier, in: directory),
+              let walker = FileManager.default.enumerator(at: channel.appending(path: "snapshotCache"),
+                                                          includingPropertiesForKeys: [.contentModificationDateKey])
+        else { return nil }
+        var newest: (date: Date, style: Int)?
+        for case let url as URL in walker where url.lastPathComponent == "Info.plist" {
+            guard let data = try? Data(contentsOf: url),
+                  let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+                  let style = plist["PUIPosterSnapshotBundleInfoKeyUserInterfaceStyle"] as? Int else { continue }
+            let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            if newest == nil || date > newest!.date { newest = (date, style) }
+        }
+        switch newest?.style {
+        case 2: return true    // dark
+        case 1: return false   // light
+        default: return nil
+        }
+    }
+
+    /// The channel folder whose info file names this conversation.
+    private static func channel(forChat identifier: String, in directory: URL) -> URL? {
         guard !identifier.isEmpty,
               let channels = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
         else { return nil }
-        for channel in channels {
+        return channels.first { channel in
             guard let version = newestNumbered(in: channel.appending(path: "channelVersions")),
                   let data = try? Data(contentsOf: version.appending(path: "channelInfo.plist")),
                   let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
-                  let objects = plist["$objects"] as? [Any],
-                  objects.contains(where: { ($0 as? String) == identifier })
-            else { continue }
-            guard let poster = newestNumbered(in: channel.appending(path: "channelPosterVersions")) else { return nil }
-            return newestImage(under: poster)
+                  let objects = plist["$objects"] as? [Any] else { return false }
+            return objects.contains { ($0 as? String) == identifier }
         }
-        return nil
     }
 
     /// The highest-numbered subfolder ("0", "1", …): the current version.

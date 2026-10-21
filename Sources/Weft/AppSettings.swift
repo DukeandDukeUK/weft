@@ -49,6 +49,15 @@ final class AppSettings {
 
     func hueIndex(forChat chat: Int64) -> Int? { conversationHues[String(chat)] }
 
+    /// Light or dark chosen for one conversation ("light"/"dark"); nil =
+    /// automatic (as Messages shows it, or Weft's normal appearance).
+    private(set) var conversationAppearances: [String: String]
+    func appearance(forChat chat: Int64) -> String? { conversationAppearances[String(chat)] }
+    func setAppearance(_ value: String?, forChat chat: Int64) {
+        conversationAppearances[String(chat)] = value
+        defaults.set(conversationAppearances, forKey: Keys.conversationAppearances)
+    }
+
     /// Nil = back to the automatic colour.
     func setHueIndex(_ index: Int?, forChat chat: Int64) {
         conversationHues[String(chat)] = index
@@ -108,6 +117,7 @@ final class AppSettings {
         pausedChats.remove(chat)
         recentOnlyChats.remove(chat)
         setHueIndex(nil, forChat: chat)
+        setAppearance(nil, forChat: chat)
     }
 
     func migrateLegacyConsentOnce() {
@@ -128,6 +138,12 @@ final class AppSettings {
     var notificationsOnboarded: Bool { didSet { defaults.set(notificationsOnboarded, forKey: Keys.notifOnboarded) } }
 
     /// "system" (follow macOS), "light" or "dark".
+    /// Show a conversation dark or light the way Messages does to suit its
+    /// background (on by default).
+    var matchMessagesStyle: Bool {
+        didSet { defaults.set(matchMessagesStyle, forKey: Keys.matchMessagesStyle) }
+    }
+
     /// Text size for the whole app (1 = the Mac's standard sizes).
     var textScale: Double {
         didSet { defaults.set(textScale, forKey: Keys.textScale) }
@@ -155,6 +171,7 @@ final class AppSettings {
         static let prefix = "weft.prefixThreadReplies"
         static let appearance = "weft.appearance"
         static let textScale = "weft.textScale"
+        static let matchMessagesStyle = "weft.matchMessagesStyle"
         static let followed = "weft.followedChats"
         static let notifyBanners = "weft.notifyBanners"
         static let notifySound = "weft.notifySound"
@@ -169,6 +186,7 @@ final class AppSettings {
         static let notifOnboarded = "weft.notificationsOnboarded"
         static let lastViewed = "weft.lastViewed"
         static let conversationHues = "weft.conversationHues"
+        static let conversationAppearances = "weft.conversationAppearances"
     }
 
     private init() {
@@ -184,12 +202,14 @@ final class AppSettings {
         self.prefixThreadReplies = d.object(forKey: Keys.prefix) as? Bool ?? true
         self.appearance = d.string(forKey: Keys.appearance) ?? "system"
         self.textScale = TextScale.nearest(d.object(forKey: Keys.textScale) as? Double ?? 1)
+        self.matchMessagesStyle = d.object(forKey: Keys.matchMessagesStyle) as? Bool ?? true
         var followed = (d.stringArray(forKey: Keys.followed) ?? []).compactMap(Int64.init)
         // Earlier versions followed exactly one conversation.
         if followed.isEmpty, let only = d.string(forKey: Keys.chatRowID).flatMap(Int64.init) { followed = [only] }
         self.followedChats = followed
         self.lastViewed = (d.dictionary(forKey: Keys.lastViewed) as? [String: Int64]) ?? [:]
         self.conversationHues = (d.dictionary(forKey: Keys.conversationHues) as? [String: Int]) ?? [:]
+        self.conversationAppearances = (d.dictionary(forKey: Keys.conversationAppearances) as? [String: String]) ?? [:]
         self.notifyBanners = d.object(forKey: Keys.notifyBanners) as? Bool ?? true
         self.notifySound = d.string(forKey: Keys.notifySound) ?? "default"
         self.dockBadge = d.object(forKey: Keys.dockBadge) as? Bool ?? true

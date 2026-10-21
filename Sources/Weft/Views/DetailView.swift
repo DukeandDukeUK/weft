@@ -350,3 +350,4 @@ struct ThreadHeader: View {
         .glassSurface(RoundedRectangle(cornerRadius: 22, style: .continuous), tint: palette.tint.opacity(0.14))
     }
 }
+

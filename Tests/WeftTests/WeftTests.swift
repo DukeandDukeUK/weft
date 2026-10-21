@@ -993,6 +993,35 @@ final class WeftTests: XCTestCase {
                        "portrait-layer_background.HEIC", "the background layer, not the foreground")
         XCTAssertNil(ConversationBackgrounds.imageURL(forChat: "+15550000002", in: root))
         XCTAssertNil(ConversationBackgrounds.imageURL(forChat: "+15559999999", in: root))
+
+        // Messages' saved preview says which style it shows the conversation in.
+        let snapshot = root.appending(path: "A/snapshotCache/PosterSnapshotCache.bundle/SnapshotBundles/s/Snapshot.pks/Contents")
+        try FileManager.default.createDirectory(at: snapshot, withIntermediateDirectories: true)
+        try PropertyListSerialization.data(fromPropertyList: ["PUIPosterSnapshotBundleInfoKeyUserInterfaceStyle": 2], format: .binary, options: 0)
+            .write(to: snapshot.appending(path: "Info.plist"))
+        XCTAssertEqual(ConversationBackgrounds.isDark(forChat: "+15550000001", in: root), true)
+        XCTAssertNil(ConversationBackgrounds.isDark(forChat: "+15550000002", in: root), "no preview: follow the Mac")
+    }
+
+    // MARK: - 0.4.12 dark or light per conversation
+
+    func testConversationStyleChoice() {
+        let vm = WeftViewModel()
+        let s = vm.settings
+        let before = (s.selectedChatRowID, s.matchMessagesStyle)
+        defer { s.selectedChatRowID = before.0; s.matchMessagesStyle = before.1; s.setAppearance(nil, forChat: 9401) }
+        s.selectedChatRowID = 9401
+        s.matchMessagesStyle = true
+        vm.backgroundIsDark = true
+        XCTAssertEqual(vm.conversationIsDark, true, "Messages shows it dark")
+        s.matchMessagesStyle = false
+        XCTAssertNil(vm.conversationIsDark, "matching off: normal appearance")
+        s.setAppearance("light", forChat: 9401)
+        XCTAssertEqual(vm.conversationIsDark, false, "your choice for this conversation wins")
+        s.matchMessagesStyle = true
+        XCTAssertEqual(vm.conversationIsDark, false, "even over Messages' style")
+        s.setAppearance(nil, forChat: 9401)
+        XCTAssertEqual(vm.conversationIsDark, true, "Automatic: back to Messages' style")
     }
 
     // MARK: - 0.4.10 staying in the topic you're in

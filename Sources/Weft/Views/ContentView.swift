@@ -4,6 +4,29 @@ struct ContentView: View {
     @State private var viewModel = WeftViewModel()
     @State private var confirmResort = false
 
+    /// Whether Weft's own appearance (Settings → Appearance, or the Mac's
+    /// when that's Automatic) is dark. Not affected by a conversation's style.
+    @State private var macIsDark = ContentView.macIsDark()
+
+    /// The Mac's own light/dark setting (System Settings → Appearance).
+    static func macIsDark() -> Bool {
+        UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
+    }
+
+    /// Weft's normal appearance: its own setting, or the Mac's when Automatic.
+    private var appIsDark: Bool {
+        switch viewModel.settings.appearance {
+        case "dark": return true
+        case "light": return false
+        default: return macIsDark
+        }
+    }
+
+    /// The open conversation's style from Messages, when matching is on.
+    private var conversationScheme: ColorScheme? {
+        viewModel.conversationIsDark.map { $0 ? .dark : .light }
+    }
+
     var body: some View {
         NavigationSplitView {
             SidebarView(viewModel: viewModel)
@@ -13,6 +36,16 @@ struct ContentView: View {
         // Text with no style of its own (message bubbles, sidebar rows)
         // follows the Text Size setting too.
         .scaledFont(.body)
+        // Like Messages: while a conversation that Messages shows dark (or
+        // light) to suit its background is open, the whole window follows;
+        // opening any other conversation goes back to the usual appearance.
+        // Always an explicit choice: SwiftUI never switches a window back
+        // from dark when told "no preference", and setting the window's
+        // appearance directly fought SwiftUI's own setting.
+        .preferredColorScheme(conversationScheme ?? (appIsDark ? .dark : .light))
+        .onReceive(DistributedNotificationCenter.default().publisher(for: Notification.Name("AppleInterfaceThemeChangedNotification"))) { _ in
+            macIsDark = Self.macIsDark()
+        }
         .environment(\.conversationPalette, viewModel.palette)
         .navigationTitle("Weft")
         .tint(WeftStyle.accent)
@@ -217,3 +250,4 @@ struct QueueButton: View {
         }
     }
 }
+
