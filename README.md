@@ -8,7 +8,7 @@ If you text an AI assistant (or your boss, or the family group) about everything
 
 ### Works with AI assistants you text
 
-Weft sorts any conversation in Messages, so it works with AI assistants you talk to through iMessage or regular texts, such as **[Instinct](https://instinct.com)**, **[Poke](https://poke.com)**, **[Anuma](https://www.anuma.ai)** and **[Folk](https://www.folk.com)**. Add the assistant's conversation with **+** and Weft sorts it like any other. Weft isn't affiliated with any of them.
+Weft sorts any conversation in Messages, so it works with AI assistants you talk to through iMessage or regular texts, such as **[Instinct](https://instinct.com)**, **[Poke](https://poke.com)**, **[Folk](https://www.folk.com)**, **[Fo](https://wajo.ai)**, **[Pally](https://pally.com)** and **Tab**. Add the assistant's conversation with **+** and Weft sorts it like any other. Weft isn't affiliated with any of them.
 
 - **Topics, sorted automatically.** New messages are filed into the right topic a few seconds after they arrive, or a new topic is started. When a conversation comes back to an earlier subject, it lands in that same topic.
 - **Your whole history.** After the first sort, Weft keeps sorting the older part of a long conversation in the background (you can turn this off in Settings).
