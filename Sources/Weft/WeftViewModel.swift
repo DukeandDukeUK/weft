@@ -314,6 +314,7 @@ final class WeftViewModel {
         // the view to All messages, so a reply typed afterwards went out
         // without its "Re: <topic>" tag.
         if chat.id == settings.selectedChatRowID, !messages.isEmpty { return }
+        pendingAttachments = []
         // Remember the topic you're leaving, for the "Back to …" offer.
         if let leaving = settings.selectedChatRowID, case .topic(let id)? = sidebarSelection {
             lastTopicByChat[leaving] = id
@@ -1541,18 +1542,31 @@ final class WeftViewModel {
 
     // MARK: - Sending
 
-    /// Returns false if the message wasn't sent.
+    /// Files waiting to be sent with the next reply (+ button or drag & drop).
+    var pendingAttachments: [URL] = []
+
+    func addAttachments(_ urls: [URL]) {
+        for url in urls where url.isFileURL && !pendingAttachments.contains(url) {
+            var isFolder: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder), !isFolder.boolValue else { continue }
+            pendingAttachments.append(url)
+        }
+    }
+
+    /// Sends the text (if any), then any waiting files. Returns false if
+    /// nothing was sent.
     @discardableResult
     func send(_ text: String) async -> Bool {
         var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, canSend, !isSending else { return false }
+        let files = pendingAttachments
+        guard !trimmed.isEmpty || !files.isEmpty, canSend, !isSending else { return false }
         returnTopicID = nil
         let handle = settings.selectedHandleId
         let groupChatGuid = isGroupChat ? selectedChat?.guid : nil
         let groupService = selectedChat?.service ?? ""
         // Replying inside a thread: tell the other side which subject this is, and
         // keep this message and the replies to it in the thread.
-        if let topic = selectedTopic {
+        if let topic = selectedTopic, !trimmed.isEmpty {
             if settings.prefixThreadReplies {
                 trimmed = String(localized: "Re: \(topic.title) — \(trimmed)", comment: "A reply sent from inside a topic: topic title, then the message")
             }
@@ -1565,13 +1579,23 @@ final class WeftViewModel {
         do {
             // osascript is synchronous: run it off the UI and off the
             // concurrency pool.
-            try await BlockingWork.run {
-                if let groupChatGuid, !groupChatGuid.isEmpty {
-                    try MessageSender.send(text: trimmed, toChat: groupChatGuid, service: groupService)
-                } else {
-                    try MessageSender.send(text: trimmed, to: handle)
+            func deliver(_ payload: MessageSender.Payload) async throws {
+                try await BlockingWork.run {
+                    if let groupChatGuid, !groupChatGuid.isEmpty {
+                        try MessageSender.send(payload, toChat: groupChatGuid, service: groupService)
+                    } else {
+                        try MessageSender.send(payload, to: handle)
+                    }
                 }
             }
+            if !trimmed.isEmpty { try await deliver(.text(trimmed)) }
+            // Then each file; a failure leaves the unsent ones waiting.
+            for file in files {
+                let staged = try MessageSender.stage(file)
+                try await deliver(.file(staged))
+                pendingAttachments.removeAll { $0 == file }
+            }
+            MessageSender.clearOldStagedFiles()
             await pollOnce() // pick up our own message quickly
             scrollToken += 1
             return true

@@ -33,12 +33,34 @@ struct MessageSender: Sendable {
             .replacingOccurrences(of: "\"", with: "\\\"")
     }
 
+    /// What to send: text, or a file (by path).
+    enum Payload: Sendable {
+        case text(String)
+        case file(URL)
+
+        /// The AppleScript expression for it.
+        var script: String {
+            switch self {
+            case .text(let text): return "\"\(MessageSender.appleScriptEscape(text))\""
+            case .file(let url): return "POSIX file \"\(MessageSender.appleScriptEscape(url.path))\""
+            }
+        }
+    }
+
     static func send(text: String, to handleId: String) throws {
+        try send(.text(text), to: handleId)
+    }
+
+    static func send(text: String, toChat chatGuid: String, service: String) throws {
+        try send(.text(text), toChat: chatGuid, service: service)
+    }
+
+    static func send(_ payload: Payload, to handleId: String) throws {
         // No shell is involved (we exec osascript directly), so the only
         // quoting we need is AppleScript's own string-literal escaping.
         let script = """
             tell application "Messages"
-                send "\(appleScriptEscape(text))" to buddy "\(appleScriptEscape(handleId))"
+                send \(payload.script) to buddy "\(appleScriptEscape(handleId))"
             end tell
             """
         let (status, errText) = try runOsascript(script: script)
@@ -54,7 +76,7 @@ struct MessageSender: Sendable {
     /// this reaches everyone in the group (Messages: "send … to chat").
     /// - Parameter service: "iMessage" or "SMS", used only if Messages doesn't
     ///   recognise the database's newer "any;…" id form.
-    static func send(text: String, toChat chatGuid: String, service: String) throws {
+    static func send(_ payload: Payload, toChat chatGuid: String, service: String) throws {
         var candidates = [chatGuid]
         if chatGuid.hasPrefix("any;"), !service.isEmpty {
             candidates.append(service + chatGuid.dropFirst(3))
@@ -64,7 +86,7 @@ struct MessageSender: Sendable {
         for id in candidates {
             let script = """
                 tell application "Messages"
-                    send "\(appleScriptEscape(text))" to chat id "\(appleScriptEscape(id))"
+                    send \(payload.script) to chat id "\(appleScriptEscape(id))"
                 end tell
                 """
             let (status, errText) = try runOsascript(script: script)
@@ -79,6 +101,36 @@ struct MessageSender: Sendable {
             guard errText.contains("-1728") else { break }
         }
         throw SendError.failed(exitCode: lastStatus, message: lastError)
+    }
+
+    // MARK: - Files
+
+    /// Messages only reliably reads files it's asked to send by script from
+    /// certain folders (its own sandbox), so each file is copied into
+    /// ~/Pictures/Weft just before sending. The copies are cleared out after
+    /// a day (Messages keeps its own copy once sent).
+    static var stagingFolder: URL {
+        stagingOverride ?? FileManager.default.homeDirectoryForCurrentUser.appending(path: "Pictures/Weft")
+    }
+    /// Tests stage files in a scratch folder instead.
+    nonisolated(unsafe) static var stagingOverride: URL?
+
+    static func stage(_ file: URL) throws -> URL {
+        let folder = stagingFolder.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let copy = folder.appending(path: file.lastPathComponent)
+        try FileManager.default.copyItem(at: file, to: copy)
+        return copy
+    }
+
+    /// Remove staged copies older than a day.
+    static func clearOldStagedFiles(olderThan age: TimeInterval = 86_400) {
+        let fm = FileManager.default
+        guard let items = try? fm.contentsOfDirectory(at: stagingFolder, includingPropertiesForKeys: [.creationDateKey]) else { return }
+        for item in items {
+            let created = (try? item.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+            if Date().timeIntervalSince(created) > age { try? fm.removeItem(at: item) }
+        }
     }
 
     /// Best-effort check: can we currently drive Messages via Apple Events?

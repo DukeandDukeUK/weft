@@ -1003,6 +1003,29 @@ final class WeftTests: XCTestCase {
         XCTAssertNil(ConversationBackgrounds.isDark(forChat: "+15550000002", in: root), "no preview: follow the Mac")
     }
 
+    // MARK: - 0.4.14 sending files
+
+    func testFileAttachments() throws {
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        let file = scratch.appendingPathComponent("Quote \"final\".pdf")
+        try Data("pdf".utf8).write(to: file)
+        // The AppleScript names the file by path, quoted safely.
+        XCTAssertEqual(MessageSender.Payload.file(URL(fileURLWithPath: "/tmp/a \"b\".pdf")).script, #"POSIX file "/tmp/a \"b\".pdf""#)
+        XCTAssertEqual(MessageSender.Payload.text("hi").script, #""hi""#)
+        // Only real files are added, once each.
+        let vm = WeftViewModel()
+        vm.addAttachments([file, file, scratch])
+        XCTAssertEqual(vm.pendingAttachments, [file], "folders and duplicates are skipped")
+        // Each file is copied to the staging folder, keeping its name; old copies are cleared.
+        MessageSender.stagingOverride = scratch.appendingPathComponent("staging")
+        defer { MessageSender.stagingOverride = nil }
+        let staged = try MessageSender.stage(file)
+        XCTAssertEqual(staged.lastPathComponent, file.lastPathComponent)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: staged.path))
+        MessageSender.clearOldStagedFiles(olderThan: -1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staged.path))
+    }
+
     // MARK: - 0.4.13 "Back to <topic>" after switching conversations
 
     func testBackToTopicOfferAfterSwitching() async throws {

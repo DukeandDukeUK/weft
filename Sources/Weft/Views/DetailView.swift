@@ -75,6 +75,12 @@ struct DetailView: View {
             }
         }
         .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+        // Drag files onto the conversation to attach them to your next reply.
+        .dropDestination(for: URL.self) { urls, _ in
+            guard viewModel.canSend else { return false }
+            viewModel.addAttachments(urls)
+            return true
+        }
         // The conversation's own hue, faintly, so each one has its own air;
         // or its photo background from Messages, at full strength (the
         // bubbles are solid colours, so they stay readable on top).

@@ -37,7 +37,22 @@ struct ComposeView: View {
                     .lineLimit(1)
                     .padding(.leading, 16)
             }
+            if !viewModel.pendingAttachments.isEmpty {
+                AttachmentChips(viewModel: viewModel)
+                    .padding(.leading, 10)
+            }
             HStack(alignment: .center, spacing: 8) {
+                // Attach files (or drag them onto the conversation).
+                Button(action: pickFiles) {
+                    Image(systemName: "plus")
+                        .scaledFont(.title3)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(String(localized: "Attach files"))
+                .accessibilityLabel(String(localized: "Attach files"))
                 // Grows up to 6 lines as you type; Enter sends, Option-Return
                 // adds a new line (the standard Mac text-field behaviour).
                 TextField(
@@ -76,7 +91,7 @@ struct ComposeView: View {
                 .glassButton(prominent: true)
                 .buttonBorderShape(.circle)
                 .keyboardShortcut(.return, modifiers: .command)
-                .disabled(draftIsBlank || viewModel.isSending || !viewModel.canSend)
+                .disabled((draftIsBlank && viewModel.pendingAttachments.isEmpty) || viewModel.isSending || !viewModel.canSend)
                 .accessibilityLabel("Send")
             }
             .padding(.leading, 16)
@@ -89,9 +104,19 @@ struct ComposeView: View {
             : String(localized: "This conversation can't be replied to from Weft"))
     }
 
+    private func pickFiles() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.prompt = String(localized: "Attach")
+        if panel.runModal() == .OK { viewModel.addAttachments(panel.urls) }
+    }
+
     private func send() {
         let text = viewModel.currentDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let chat = viewModel.settings.selectedChatRowID else { return }
+        guard !text.isEmpty || !viewModel.pendingAttachments.isEmpty,
+              let chat = viewModel.settings.selectedChatRowID else { return }
         viewModel.currentDraft = ""
         Task {
             // Failed send: put the text back in that conversation's draft —
@@ -100,6 +125,41 @@ struct ComposeView: View {
             if !sent {
                 let existing = viewModel.drafts[chat] ?? ""
                 viewModel.drafts[chat] = existing.isEmpty ? text : text + "\n\n" + existing
+            }
+        }
+    }
+}
+
+/// Files waiting to be sent: name and icon, ✕ to remove.
+struct AttachmentChips: View {
+    @Bindable var viewModel: WeftViewModel
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(viewModel.pendingAttachments, id: \.self) { file in
+                    HStack(spacing: 5) {
+                        Image(nsImage: NSWorkspace.shared.icon(forFile: file.path))
+                            .resizable()
+                            .frame(width: 16, height: 16)
+                        Text(file.lastPathComponent)
+                            .scaledFont(.caption)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: 180)
+                        Button {
+                            viewModel.pendingAttachments.removeAll { $0 == file }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help(String(localized: "Don't send this file"))
+                        .accessibilityLabel(String(localized: "Remove \(file.lastPathComponent)"))
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.quaternary, in: Capsule())
+                }
             }
         }
     }
