@@ -85,6 +85,10 @@ struct SidebarView: View {
                                 ))
                             }
                         }
+                        Toggle("Add Topic to My Replies", isOn: Binding(
+                            get: { viewModel.settings.prefixesReplies(chat: chat.id) },
+                            set: { viewModel.settings.setPrefixesReplies($0, chat: chat.id) }
+                        ))
                         Menu("Appearance") {
                             let chosen = viewModel.settings.appearance(forChat: chat.id)
                             Toggle("Automatic (as in Messages)", isOn: Binding(

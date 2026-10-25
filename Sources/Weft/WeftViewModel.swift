@@ -1567,7 +1567,7 @@ final class WeftViewModel {
         // Replying inside a thread: tell the other side which subject this is, and
         // keep this message and the replies to it in the thread.
         if let topic = selectedTopic, !trimmed.isEmpty {
-            if settings.prefixThreadReplies {
+            if let chat = settings.selectedChatRowID, settings.prefixesReplies(chat: chat) {
                 trimmed = String(localized: "Re: \(topic.title) — \(trimmed)", comment: "A reply sent from inside a topic: topic title, then the message")
             }
             noteReplySent(inTopic: topic.id, text: trimmed)

@@ -28,7 +28,7 @@ struct SettingsView: View {
 
             Section("Topics") {
                 Toggle("Start topic replies with “Re: <topic> —”", isOn: Bindable(viewModel.settings).prefixThreadReplies)
-                Text("Other participants see one long chat. The prefix tells them which subject your reply is about.")
+                Text("Other participants see one long chat. The prefix tells them which subject your reply is about. This is the starting choice: right-click a conversation → Add Topic to My Replies to set it for that conversation (on for AI assistants, off for people).")
                     .scaledFont(.caption)
                     .foregroundStyle(.secondary)
             }

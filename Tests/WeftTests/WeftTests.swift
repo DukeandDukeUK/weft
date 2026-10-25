@@ -1003,6 +1003,30 @@ final class WeftTests: XCTestCase {
         XCTAssertNil(ConversationBackgrounds.isDark(forChat: "+15550000002", in: root), "no preview: follow the Mac")
     }
 
+    // MARK: - 0.4.15 topic tag per conversation
+
+    func testTopicTagPerConversation() async throws {
+        var sent: [String] = []
+        MessageSender.testHook = { sent.append($0) }
+        defer { MessageSender.testHook = nil }
+        let vm = WeftViewModel()
+        let s = vm.settings
+        let before = (s.selectedChatRowID, s.prefixThreadReplies, s.selectedHandleId)
+        defer { s.selectedChatRowID = before.0; s.prefixThreadReplies = before.1; s.selectedHandleId = before.2; s.forgetConversation(9601) }
+        vm.chats = [ChatInfo(id: 9601, participants: "+15550000001", messageCount: 1, lastDate: nil, lastSnippet: nil)]
+        s.selectedChatRowID = 9601
+        s.selectedHandleId = "+15550000001"
+        let topic = Topic(id: UUID(), title: "Car search", summary: "", messageIds: [1])
+        vm.messages = [msg(1)]
+        vm.topics = [topic]
+        vm.sidebarSelection = .topic(topic.id)
+        s.prefixThreadReplies = true
+        _ = await vm.send("hello")
+        s.setPrefixesReplies(false, chat: 9601)      // a real person: no tag
+        _ = await vm.send("hi again")
+        XCTAssertEqual(sent, ["Re: Car search — hello", "hi again"])
+    }
+
     // MARK: - 0.4.14 sending files
 
     func testFileAttachments() throws {

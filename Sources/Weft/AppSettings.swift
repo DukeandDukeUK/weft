@@ -26,7 +26,16 @@ final class AppSettings {
     }
     /// Start replies sent from inside a thread with "Re: <thread title> — "
     /// so the other side knows which subject you mean.
+    /// The starting choice for conversations you haven't set (Settings).
     var prefixThreadReplies: Bool { didSet { defaults.set(prefixThreadReplies, forKey: Keys.prefix) } }
+    /// Per conversation (right-click → Add Topic to My Replies): on for AI
+    /// conversations, off for people. Unset = the Settings choice.
+    private(set) var prefixByChat: [String: Bool]
+    func prefixesReplies(chat: Int64) -> Bool { prefixByChat[String(chat)] ?? prefixThreadReplies }
+    func setPrefixesReplies(_ on: Bool, chat: Int64) {
+        prefixByChat[String(chat)] = on
+        defaults.set(prefixByChat, forKey: Keys.prefixByChat)
+    }
     /// Conversations added to Weft (chat.ROWIDs), in the order added. All of
     /// them are kept sorted in the background.
     var followedChats: [Int64] {
@@ -118,6 +127,8 @@ final class AppSettings {
         recentOnlyChats.remove(chat)
         setHueIndex(nil, forChat: chat)
         setAppearance(nil, forChat: chat)
+        prefixByChat[String(chat)] = nil
+        defaults.set(prefixByChat, forKey: Keys.prefixByChat)
     }
 
     func migrateLegacyConsentOnce() {
@@ -169,6 +180,7 @@ final class AppSettings {
         static let chatRowID = "weft.chatRowID"
         static let handleId = "weft.handleId"
         static let prefix = "weft.prefixThreadReplies"
+        static let prefixByChat = "weft.prefixByChat"
         static let appearance = "weft.appearance"
         static let textScale = "weft.textScale"
         static let matchMessagesStyle = "weft.matchMessagesStyle"
@@ -200,6 +212,7 @@ final class AppSettings {
         }
         self.selectedHandleId = d.string(forKey: Keys.handleId) ?? ""
         self.prefixThreadReplies = d.object(forKey: Keys.prefix) as? Bool ?? true
+        self.prefixByChat = (d.dictionary(forKey: Keys.prefixByChat) as? [String: Bool]) ?? [:]
         self.appearance = d.string(forKey: Keys.appearance) ?? "system"
         self.textScale = TextScale.nearest(d.object(forKey: Keys.textScale) as? Double ?? 1)
         self.matchMessagesStyle = d.object(forKey: Keys.matchMessagesStyle) as? Bool ?? true

@@ -55,7 +55,20 @@ struct MessageSender: Sendable {
         try send(.text(text), toChat: chatGuid, service: service)
     }
 
+    /// Tests: messages go here instead of to Messages (nothing is sent).
+    nonisolated(unsafe) static var testHook: ((String) -> Void)?
+
+    private static func caughtByTest(_ payload: Payload) -> Bool {
+        guard let hook = testHook else { return false }
+        switch payload {
+        case .text(let text): hook(text)
+        case .file(let url): hook("[file] " + url.lastPathComponent)
+        }
+        return true
+    }
+
     static func send(_ payload: Payload, to handleId: String) throws {
+        if caughtByTest(payload) { return }
         // No shell is involved (we exec osascript directly), so the only
         // quoting we need is AppleScript's own string-literal escaping.
         let script = """
@@ -77,6 +90,7 @@ struct MessageSender: Sendable {
     /// - Parameter service: "iMessage" or "SMS", used only if Messages doesn't
     ///   recognise the database's newer "any;…" id form.
     static func send(_ payload: Payload, toChat chatGuid: String, service: String) throws {
+        if caughtByTest(payload) { return }
         var candidates = [chatGuid]
         if chatGuid.hasPrefix("any;"), !service.isEmpty {
             candidates.append(service + chatGuid.dropFirst(3))
