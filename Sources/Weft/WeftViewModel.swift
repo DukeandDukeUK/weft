@@ -455,6 +455,14 @@ final class WeftViewModel {
                     updateBadge()
                 }
             }
+            // Read them in Messages meanwhile? Then they're not new here
+            // either: recount from Messages' own read markers.
+            if openUnread > 0, !NSApp.isActive,
+               let unread = try? await reader.countIncoming(chatRowID: chatId, after: settings.lastViewedRowID(chat: chatId)),
+               unread != openUnread, mySession == session {
+                openUnread = unread
+                updateBadge()
+            }
             // Reactions can arrive on their own, after the message they're on.
             await applyNewReactions(chatRowID: chatId)
             guard !fresh.isEmpty else { return }

@@ -471,6 +471,7 @@ actor ChatDBReader {
               JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
              WHERE cmj.chat_id = ? AND m.ROWID > ?
                AND m.is_from_me = 0 AND m.associated_message_guid IS NULL
+               AND COALESCE(m.is_read, 0) = 0   -- read in Messages = not new
             """
         return try query(sql, bind: { stmt in
             sqlite3_bind_int64(stmt, 1, chatRowID)

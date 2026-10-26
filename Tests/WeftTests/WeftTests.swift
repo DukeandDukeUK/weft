@@ -366,6 +366,8 @@ final class WeftTests: XCTestCase {
             sqlite3_step(stmt); sqlite3_finalize(stmt)
             sqlite3_exec(db, "INSERT INTO chat_message_join VALUES (\(r.chat), \(r.id))", nil, nil, nil)
         }
+        // Messages' read marker (everything starts unread).
+        sqlite3_exec(db, "ALTER TABLE message ADD COLUMN is_read INTEGER DEFAULT 0", nil, nil, nil)
         return path
     }
 
@@ -1001,6 +1003,21 @@ final class WeftTests: XCTestCase {
             .write(to: snapshot.appending(path: "Info.plist"))
         XCTAssertEqual(ConversationBackgrounds.isDark(forChat: "+15550000001", in: root), true)
         XCTAssertNil(ConversationBackgrounds.isDark(forChat: "+15550000002", in: root), "no preview: follow the Mac")
+    }
+
+    // MARK: - 0.4.16 read in Messages = not new in Weft
+
+    func testMessagesReadInMessagesAreNotCountedAsNew() async throws {
+        let path = try fixtureDB([(1, 7, "hi", nil, false), (2, 7, "there", nil, false), (3, 7, "mine", nil, true)])
+        let reader = ChatDBReader(path: path)
+        let before = try await reader.countIncoming(chatRowID: 7, after: 0)
+        XCTAssertEqual(before, 2, "two incoming, unread")
+        var db: OpaquePointer?
+        sqlite3_open(path, &db)
+        sqlite3_exec(db, "UPDATE message SET is_read = 1 WHERE ROWID = 1", nil, nil, nil)
+        sqlite3_close(db)
+        let after = try await reader.countIncoming(chatRowID: 7, after: 0)
+        XCTAssertEqual(after, 1, "the one read in Messages no longer counts")
     }
 
     // MARK: - 0.4.15 topic tag per conversation
