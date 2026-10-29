@@ -149,6 +149,12 @@ if LC_ALL=C grep -rqa "$HOME" "$APP_DIR"; then
     exit 1
 fi
 
+# Rebuilding deletes the old build copy, which can make the F4 Apps grid
+# forget the installed Weft too. Re-announce the installed copy.
+if [ -d /Applications/Weft.app ]; then
+    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f /Applications/Weft.app || true
+fi
+
 echo ""
 echo "Done: $APP_DIR (version $VERSION)"
 echo "First launch: grant Full Disk Access in System Settings > Privacy & Security,"
