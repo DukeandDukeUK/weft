@@ -1210,6 +1210,34 @@ final class WeftTests: XCTestCase {
         XCTAssertNil(SegmentationCache.load(chatId: chat), "its topics were kept")
         XCTAssertFalse(vm.settings.hasConsent(chat), "adding it back should ask again, like a new conversation")
     }
+
+    // MARK: Message runs
+
+    /// Messages from one side in a row are drawn as a run (close together,
+    /// one time label). A run ends when the other side speaks, when another
+    /// person in a group speaks, or at midnight.
+    func testMessageRunsGroupBySideAndPersonAndDay() {
+        let day = Date(timeIntervalSince1970: 1_790_000_000)
+        func m(_ id: Int64, me: Bool, handle: String = "+15550001111", at: Date = day) -> ChatMessage {
+            ChatMessage(id: id, text: "x", isFromMe: me, date: at, handleId: me ? "" : handle)
+        }
+        XCTAssertTrue(MessageListView.sameRun(m(1, me: false), m(2, me: false), grouped: false))
+        XCTAssertTrue(MessageListView.sameRun(m(1, me: true), m(2, me: true), grouped: false))
+        XCTAssertFalse(MessageListView.sameRun(m(1, me: true), m(2, me: false), grouped: false), "sides changed")
+        // One-to-one: the other side's handle may vary (email vs number); still one run.
+        XCTAssertTrue(MessageListView.sameRun(m(1, me: false), m(2, me: false, handle: "a@b.c"), grouped: false))
+        // Group: a different person is a new run; your own messages always run together.
+        XCTAssertFalse(MessageListView.sameRun(m(1, me: false), m(2, me: false, handle: "+15550002222"), grouped: true))
+        XCTAssertTrue(MessageListView.sameRun(m(1, me: true), m(2, me: true), grouped: true))
+        let nextDay = Calendar.current.date(byAdding: .day, value: 1, to: day)!
+        XCTAssertFalse(MessageListView.sameRun(m(1, me: false), m(2, me: false, at: nextDay), grouped: false), "a new day starts a new run")
+    }
+
+    /// The line under a conversation's name in the sidebar.
+    func testConversationCountsLine() {
+        XCTAssertEqual(ConversationCounts(topics: 4, followUps: 2).summary, "4 topics · 2 follow-ups")
+        XCTAssertEqual(ConversationCounts(topics: 1, followUps: 0).summary, "1 topic", "no follow-ups: don't say so")
+    }
 }
 
 @objc(WeftFakeImage) private final class FakeImage: NSObject, NSCoding {

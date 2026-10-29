@@ -23,12 +23,12 @@ enum ConversationColors {
     /// (light mode) and a deep tint (dark mode).
     static let all: [Hue] = [
         Hue(id: 0, name: String(localized: "Indigo", comment: "Conversation colour"), degrees: 232),
-        Hue(id: 1, name: String(localized: "Amber", comment: "Conversation colour"), degrees: 28),
+        Hue(id: 1, name: String(localized: "Apricot", comment: "Conversation colour"), degrees: 22),
         Hue(id: 2, name: String(localized: "Rose", comment: "Conversation colour"), degrees: 340),
         Hue(id: 3, name: String(localized: "Green", comment: "Conversation colour"), degrees: 150),
         Hue(id: 4, name: String(localized: "Teal", comment: "Conversation colour"), degrees: 190),
         Hue(id: 5, name: String(localized: "Violet", comment: "Conversation colour"), degrees: 275),
-        Hue(id: 6, name: String(localized: "Olive", comment: "Conversation colour"), degrees: 60),
+        Hue(id: 6, name: String(localized: "Sky", comment: "Conversation colour"), degrees: 205),
         Hue(id: 7, name: String(localized: "Coral", comment: "Conversation colour"), degrees: 5),
     ]
 
@@ -66,6 +66,7 @@ enum ConversationColors {
     static func palette(index: Int) -> ConversationPalette {
         let hue = all[((index % all.count) + all.count) % all.count]
         let h = hue.degrees / 360
+        let warm = hue.degrees < 45 || hue.degrees > 330
         return ConversationPalette(
             hueIndex: hue.id,
             // Accents: strong enough to read as a colour on both canvases.
@@ -73,12 +74,17 @@ enum ConversationColors {
                         dark: Color(hue: h, saturation: 0.45, brightness: 0.92)),
             // Their bubbles: a light wash with solid black text (light),
             // a deep tint with white text (dark) — the same contrast as
-            // the plain grey they replace.
-            theirBubble: Color(light: Color(hue: h, saturation: 0.20, brightness: 0.95),
-                               dark: Color(hue: h, saturation: 0.30, brightness: 0.34)),
-            // The conversation background: barely there, but there.
+            // the plain grey they replace. Warm hues (apricot, coral) get
+            // a little less saturation so they stay fresh, not beige.
+            theirBubble: Color(light: Color(hue: h, saturation: warm ? 0.16 : 0.20, brightness: 0.96),
+                               dark: Color(hue: h, saturation: warm ? 0.26 : 0.32, brightness: 0.36)),
+            // Unread counts: deep enough for white digits on either canvas.
+            badge: Color(light: Color(hue: h, saturation: 0.70, brightness: 0.60),
+                         dark: Color(hue: h, saturation: 0.55, brightness: 0.75)),
+            // The conversation background: barely there, but there — in
+            // dark mode a touch lighter than before so the hue shows.
             canvas: Color(light: Color(hue: h, saturation: 0.05, brightness: 0.99),
-                          dark: Color(hue: h, saturation: 0.28, brightness: 0.12))
+                          dark: Color(hue: h, saturation: 0.22, brightness: 0.15))
         )
     }
 }
@@ -88,6 +94,7 @@ struct ConversationPalette: Equatable {
     let hueIndex: Int
     let tint: Color
     let theirBubble: Color
+    let badge: Color
     let canvas: Color
 
     /// Sidebar selection and other soft highlights.

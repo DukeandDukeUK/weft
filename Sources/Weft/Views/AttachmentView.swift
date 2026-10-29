@@ -91,6 +91,8 @@ struct AttachmentView: View {
 /// Click to open it in your browser.
 struct LinkPreviewCard: View {
     let link: LinkPreview
+    /// The bubble colours of whoever shared it (their hue, or neutral).
+    var palette: ConversationPalette? = nil
     @State private var image: NSImage?
 
     var body: some View {
@@ -119,7 +121,7 @@ struct LinkPreviewCard: View {
             }
             .frame(width: 300)
             .foregroundStyle(WeftStyle.theirText)
-            .background(WeftStyle.theirBubble)
+            .background(palette?.theirBubble ?? WeftStyle.theirBubble)
             .clipShape(RoundedRectangle(cornerRadius: WeftStyle.bubbleRadius, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: WeftStyle.bubbleRadius, style: .continuous))
         }

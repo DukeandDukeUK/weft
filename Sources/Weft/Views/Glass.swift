@@ -67,12 +67,16 @@ enum WeftStyle {
                                    dark: Color(red: 0.21, green: 0.22, blue: 0.29))
     /// Text in their bubbles: solid, for the most contrast on the gray.
     static let theirText = Color(light: .black, dark: .white)
-    /// Unread-count badges: the icon's indigo in both modes (6.2:1 with white).
-    static let badge = Color(red: 0.27, green: 0.31, blue: 0.86)
-    // The conversation canvas, their bubbles and the sidebar selection take
-    // the open conversation's own hue: see ConversationColors.
+    // Unread counts, the conversation canvas, their bubbles and the sidebar
+    // selection take the conversation's own hue: see ConversationColors.
 
     static let bubbleRadius: CGFloat = 18
+    /// The corner where a bubble joins the next one in its run.
+    static let joinedBubbleRadius: CGFloat = 6
+    /// Their avatar beside the last bubble of a run.
+    static let runAvatarSize: CGFloat = 24
+    /// The coloured "thread" on the leading edge of a topic row or header.
+    static let threadBarWidth: CGFloat = 3
     static let readableWidth: CGFloat = 760
 }
 

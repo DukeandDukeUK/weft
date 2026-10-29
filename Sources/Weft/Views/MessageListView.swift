@@ -23,18 +23,23 @@ struct MessageListView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 0) {
-                LazyVStack(alignment: .leading, spacing: 10) {
+                LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(visible.enumerated()), id: \.element.id) { index, message in
                         if viewModel.isFirstOfDay(index, in: visible) {
                             DayDivider(date: message.date)
                         }
+                        // Messages from one side in a row form a "run":
+                        // close together, one time label, flatter corners
+                        // where they join. Like Messages, but calmer.
+                        let grouped = viewModel.isGroupChat
+                        let first = index == 0 || !Self.sameRun(visible[index - 1], message, grouped: grouped)
+                        let last = index + 1 == visible.count || !Self.sameRun(message, visible[index + 1], grouped: grouped)
                         MessageRow(
                             message: message,
-                            senderLabel: viewModel.isGroupChat && !message.isFromMe
-                                && (index == 0 || visible[index - 1].handleId != message.handleId
-                                    || visible[index - 1].isFromMe)
-                                ? message.senderName : nil,
+                            senderLabel: grouped && !message.isFromMe && first ? message.senderName : nil,
                             palette: viewModel.palette(for: message),
+                            isFirstInRun: first,
+                            isLastInRun: last,
                             menuItems: { menuItems(for: message) }
                         )
                         .id(message.id)
@@ -103,6 +108,14 @@ struct MessageListView: View {
     }
 
     private static let bottomID = "bottom-marker"
+
+    /// Whether two neighbouring messages belong to the same run: the same
+    /// side (in a group, the same person) on the same day.
+    static func sameRun(_ a: ChatMessage, _ b: ChatMessage, grouped: Bool) -> Bool {
+        guard a.isFromMe == b.isFromMe else { return false }
+        if grouped, !a.isFromMe, a.handleId != b.handleId { return false }
+        return Calendar.current.isDate(a.date, inSameDayAs: b.date)
+    }
 
     /// Right-click a message: move it, split the topic, copy, open in Messages.
     private func menuItems(for message: ChatMessage) -> [MessageMenuItem] {
@@ -185,6 +198,10 @@ struct MessageRow: View {
     var senderLabel: String? = nil
     /// The conversation's colours (or, in a group, this person's).
     var palette: ConversationPalette = ConversationColors.palette(index: 0)
+    /// First / last message of a run from one side (see MessageListView).
+    /// A lone message is both.
+    var isFirstInRun = true
+    var isLastInRun = true
     /// Right-click menu, also shown when right-clicking the selectable text.
     var menuItems: () -> [MessageMenuItem] = { [] }
 
@@ -195,9 +212,43 @@ struct MessageRow: View {
         return formatter
     }()
 
+    /// Corners: round, except where the bubble joins its neighbour in the run.
+    private var bubbleShape: UnevenRoundedRectangle {
+        let r = WeftStyle.bubbleRadius
+        let joined = WeftStyle.joinedBubbleRadius
+        let me = message.isFromMe
+        return UnevenRoundedRectangle(
+            topLeadingRadius: !me && !isFirstInRun ? joined : r,
+            bottomLeadingRadius: !me && !isLastInRun ? joined : r,
+            bottomTrailingRadius: me && !isLastInRun ? joined : r,
+            topTrailingRadius: me && !isFirstInRun ? joined : r,
+            style: .continuous)
+    }
+
+    private var time: String { Self.timeFormatter.string(from: message.date) }
+
+    /// Height of the time label under a run (follows Text Size), so the
+    /// avatar can sit level with the bubble above it.
+    private var timeHeight: CGFloat { ceil(TextScale.baseSize(.caption2) * AppSettings.shared.textScale * 1.3) }
+
     var body: some View {
-        HStack {
+        HStack(alignment: .bottom, spacing: 8) {
             if message.isFromMe { Spacer(minLength: 48) }
+            if !message.isFromMe {
+                // Their avatar, once per run on its last bubble; the column
+                // stays reserved above so the bubbles line up.
+                Group {
+                    if isLastInRun {
+                        Avatar(handle: message.handleId, size: WeftStyle.runAvatarSize, tint: palette.tint)
+                            .accessibilityHidden(true)
+                    } else {
+                        Color.clear
+                    }
+                }
+                .frame(width: WeftStyle.runAvatarSize, height: WeftStyle.runAvatarSize)
+                // Sit level with the bubble, above the time label.
+                .padding(.bottom, isLastInRun ? timeHeight + 3 : 0)
+            }
             VStack(alignment: message.isFromMe ? .trailing : .leading, spacing: 3) {
                 if let senderLabel, !senderLabel.isEmpty {
                     Text(senderLabel)
@@ -224,14 +275,21 @@ struct MessageRow: View {
                         )
                             .padding(.horizontal, 14)
                             .padding(.vertical, 9)
-                            .background(message.isFromMe ? WeftStyle.myBubble : palette.theirBubble,
-                                        in: RoundedRectangle(cornerRadius: WeftStyle.bubbleRadius, style: .continuous))
+                            .background(message.isFromMe ? WeftStyle.myBubble : palette.theirBubble, in: bubbleShape)
                             // Solid black/white in their bubbles: macOS's normal text
                             // color is slightly see-through and loses contrast on gray.
                             .foregroundStyle(message.isFromMe ? Color.white : WeftStyle.theirText)
                     }
-                    if let link = message.link { LinkPreviewCard(link: link) }
+                    if let link = message.link { LinkPreviewCard(link: link, palette: palette) }
                 }
+                    // The exact time of every message, on hover and for VoiceOver;
+                    // on screen only the last message of a run shows it.
+                    .help(time)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel(Text(message.isFromMe
+                        ? String(localized: "You, \(time)", comment: "VoiceOver: a message you sent, and its time")
+                        : String(localized: "\(message.senderName.isEmpty ? String(localized: "Them", comment: "The other side of a conversation") : message.senderName), \(time)",
+                                 comment: "VoiceOver: who sent a message, and its time")))
                     // Reactions sit on the bubble's own top corner, like
                     // Messages (attached before the width limit, so they
                     // follow the bubble, not the column).
@@ -246,12 +304,19 @@ struct MessageRow: View {
                     }
                     .padding(.top, message.reactions.isEmpty ? 0 : 16)
                     .frame(maxWidth: 560, alignment: message.isFromMe ? .trailing : .leading)
-                Text(Self.timeFormatter.string(from: message.date))
-                    .scaledFont(.caption2)
-                    .foregroundStyle(.secondary)
+                if isLastInRun {
+                    Text(time)
+                        .labelFont(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
+                        .frame(height: timeHeight)
+                        .accessibilityHidden(true)
+                }
             }
             if !message.isFromMe { Spacer(minLength: 48) }
         }
+        // Close together inside a run, a clear gap between runs.
+        .padding(.bottom, isLastInRun ? 14 : 3)
     }
 }
 
@@ -270,6 +335,8 @@ struct ReactionBadge: View {
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
         .glassSurface(Capsule())
+        // A thin ring so the pill still reads on a dark or photo canvas.
+        .overlay(Capsule().stroke(Color.primary.opacity(0.14), lineWidth: 1))
         .contentShape(Capsule())
         // Click to see who reacted, like Messages.
         .onTapGesture { showWho = true }
@@ -316,7 +383,14 @@ struct Avatar: View {
                 ZStack {
                     LinearGradient(colors: tint.map { [$0, $0.opacity(0.75)] } ?? [WeftStyle.accent, WeftStyle.teal],
                                    startPoint: .topLeading, endPoint: .bottomTrailing)
-                    Text(initials).font(.system(size: size * 0.4, weight: .semibold)).foregroundStyle(.white)
+                    if let initials {
+                        Text(initials).font(.system(size: size * 0.4, weight: .semibold, design: .rounded)).foregroundStyle(.white)
+                    } else {
+                        // No name to take initials from: a plain person.
+                        Image(systemName: "person.fill")
+                            .font(.system(size: size * 0.45, weight: .medium))
+                            .foregroundStyle(.white)
+                    }
                 }
             }
         }
@@ -324,12 +398,14 @@ struct Avatar: View {
         .clipShape(Circle())
     }
 
-    private var initials: String {
+    /// Initials from the contact's name; nil when there's no name (a bare
+    /// phone number), which shows a person symbol instead.
+    private var initials: String? {
         guard let handle else { return String(localized: "Me", comment: "Initials shown for the person using Weft") }
         let name = ContactNames.shared.name(for: handle) ?? ""
         let letters = name.split(separator: " ").prefix(2).compactMap(\.first)
         if !letters.isEmpty { return String(letters).uppercased() }
-        return handle.contains("@") ? String(handle.prefix(1)).uppercased() : "#"
+        return handle.contains("@") ? String(handle.prefix(1)).uppercased() : nil
     }
 }
 
@@ -346,10 +422,27 @@ struct DayDivider: View {
     }()
 
     var body: some View {
-        Text(Self.dayFormatter.string(from: date))
-            .scaledFont(.caption, weight: .medium)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
+        // The date in a small pill, with a thread drawn through it on both
+        // sides: the same line motif as the topic rows and header.
+        HStack(spacing: 10) {
+            thread
+            Text(Self.dayFormatter.string(from: date))
+                .labelFont(.caption, weight: .semibold)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(.quaternary.opacity(0.6), in: Capsule())
+            thread
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .padding(.bottom, 4)
+    }
+
+    private var thread: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.08))
+            .frame(height: 1)
+            .frame(maxWidth: 120)
     }
 }

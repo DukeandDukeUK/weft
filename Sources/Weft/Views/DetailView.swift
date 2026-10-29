@@ -277,7 +277,7 @@ struct FullDiskAccessView: View {
                 Label("Open Full Disk Access Settings", systemImage: "gearshape")
                     .padding(.horizontal, 8)
             }
-            .buttonStyle(.borderedProminent)
+            .glassButton(prominent: true)
             .controlSize(.large)
             .keyboardShortcut(.defaultAction)
 
@@ -342,30 +342,52 @@ struct ThreadHeader: View {
     @Environment(\.conversationPalette) private var palette
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
+        // A flush band, not a floating pill: the back chevron, then the
+        // topic's thread bar and its title and summary. The message box
+        // below stays the one floating glass object.
+        HStack(alignment: .center, spacing: 10) {
             Button(action: onAll) {
-                Image(systemName: "chevron.left").scaledFont(.body, weight: .semibold)
+                Image(systemName: "chevron.left")
+                    .scaledFont(.title3, weight: .semibold)
+                    .foregroundStyle(palette.tint)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
             }
-            .glassButton()
-            .buttonBorderShape(.circle)
+            .buttonStyle(.plain)
             .keyboardShortcut(.escape, modifiers: [])
             .help("All messages (Esc)")
             .accessibilityLabel("Back to all messages")
+            ThreadBar(color: palette.tint)
             VStack(alignment: .leading, spacing: 2) {
-                Text(topic.title).scaledFont(.headline)
+                Text(topic.title).scaledFont(.title3, weight: .semibold)
                 if !topic.summary.isEmpty {
                     Text(topic.summary)
-                        .scaledFont(.caption)
+                        .scaledFont(.callout)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .help(topic.summary)
                 }
             }
+            .padding(.vertical, 2)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .glassSurface(RoundedRectangle(cornerRadius: 22, style: .continuous), tint: palette.tint.opacity(0.14))
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - ThreadBar
+
+/// Weft's motif: a short coloured thread on the leading edge of a topic.
+struct ThreadBar: View {
+    let color: Color
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: WeftStyle.threadBarWidth / 2, style: .continuous)
+            .fill(color)
+            .frame(width: WeftStyle.threadBarWidth)
+            .padding(.vertical, 2)
+            .accessibilityHidden(true)
     }
 }
 

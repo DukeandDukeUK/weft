@@ -14,6 +14,10 @@ struct SidebarView: View {
     /// handle clicks (no click handler on the rows) is what lets it start a
     /// drag to reorder, the way Finder's and Mail's sidebars work.
     @State private var chatSelection: Int64?
+    /// Topic and follow-up counts of the conversations that aren't open,
+    /// read from what Weft saved for them (the open one comes live from
+    /// the view model).
+    @State private var savedCounts: [Int64: ConversationCounts] = [:]
 
     var body: some View {
         List(selection: $chatSelection) {
@@ -23,34 +27,44 @@ struct SidebarView: View {
             Section {
                 ForEach(viewModel.followedChats) { chat in
                     let chatPalette = ConversationColors.palette(forChat: chat.id, settings: viewModel.settings)
-                    ConversationRow(
-                        isSelected: viewModel.settings.selectedChatRowID == chat.id,
-                        highlight: chatPalette.soft
-                    ) {
-                        Label {
-                            Text(ContactNames.shared.shortDisplay(chat.participants)).lineLimit(1)
-                        } icon: {
-                            // One person: their photo or initials. A group:
-                            // the group symbol. Both in the conversation's hue.
+                    let isOpen = viewModel.settings.selectedChatRowID == chat.id
+                    ConversationRow(isSelected: isOpen, highlight: chatPalette.soft) {
+                        // One person: their photo or initials. A group: the
+                        // group symbol. Both in the conversation's hue.
+                        Group {
                             if chat.participants.contains(",") {
                                 Image(systemName: "person.3.fill")
                                     .foregroundStyle(chatPalette.tint)
+                                    .scaledFont(.callout)
                             } else {
-                                Avatar(handle: chat.participants, size: 22, tint: chatPalette.tint)
+                                Avatar(handle: chat.participants, size: WeftStyle.runAvatarSize, tint: chatPalette.tint)
+                            }
+                        }
+                        .frame(width: WeftStyle.runAvatarSize, height: WeftStyle.runAvatarSize)
+                        .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(ContactNames.shared.shortDisplay(chat.participants)).lineLimit(1)
+                            // "4 topics · 2 follow-ups": what Weft has made
+                            // of this conversation so far.
+                            if let line = counts(for: chat, isOpen: isOpen)?.summary {
+                                Text(line)
+                                    .labelFont(.caption)
+                                    .fontWeight(.regular)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
                             }
                         }
                         Spacer(minLength: 4)
-                        let count = viewModel.settings.selectedChatRowID == chat.id
+                        let count = isOpen
                             ? viewModel.openUnread
                             : (viewModel.background.unreadCounts[chat.id] ?? 0)
                         if count > 0 {
                             Text("\(count)")
-                                .scaledFont(.caption2, weight: .bold)
-                                .monospacedDigit()
+                                .labelFont(.caption2, weight: .bold)
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
-                                .background(WeftStyle.badge, in: Capsule())
+                                .background(chatPalette.badge, in: Capsule())
                                 .help(String(localized: "^[\(count) new message](inflect: true)"))
                         }
                     }
@@ -118,9 +132,7 @@ struct SidebarView: View {
                     viewModel.settings.followedChats = ids + viewModel.settings.followedChats.filter { !ids.contains($0) }
                 }
             } header: {
-                HStack {
-                    Text("Conversations")
-                    Spacer()
+                SectionHeader(String(localized: "Conversations")) {
                     Button {
                         viewModel.showChatPicker = true
                     } label: {
@@ -142,36 +154,31 @@ struct SidebarView: View {
                 }
 
                 ForEach(viewModel.topics) { topic in
-                    SidebarRow(
-                        isSelected: viewModel.sidebarSelection == .topic(topic.id),
-                        action: { viewModel.openThread(topic.id) }
-                    ) {
-                        Label {
-                            VStack(alignment: .leading, spacing: 2) {
+                    let isOpen = viewModel.sidebarSelection == .topic(topic.id)
+                    SidebarRow(isSelected: isOpen, alignment: .top, action: { viewModel.openThread(topic.id) }) {
+                        // The thread: a bar in the conversation's hue on the
+                        // leading edge, strong on the open topic, faint on
+                        // the rest. The same mark as the topic header.
+                        ThreadBar(color: isOpen ? palette.tint : palette.tint.opacity(0.4))
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
                                 Text(topic.title).lineLimit(1)
-                                if !topic.summary.isEmpty {
-                                    Text(topic.summary)
-                                        .scaledFont(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(2)
+                                Spacer(minLength: 4)
+                                if let date = viewModel.lastActivity(of: topic) {
+                                    Text(RelativeTime.short(date))
+                                        .labelFont(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                        .help(date.formatted(date: .abbreviated, time: .shortened))
                                 }
+                                // How many messages, when there are any.
+                                CountText(count: topic.messageIds.count)
                             }
-                        } icon: {
-                            // A dot in the conversation's hue ties the topic
-                            // to the conversation it belongs to.
-                            Circle()
-                                .fill(palette.tint)
-                                .frame(width: 8, height: 8)
-                                .padding(.top, 5)
-                        }
-                        Spacer(minLength: 4)
-                        VStack(alignment: .trailing, spacing: 3) {
-                            if let date = viewModel.lastActivity(of: topic) {
-                                Text(RelativeTime.short(date))
-                                    .scaledFont(.caption2)
+                            if !topic.summary.isEmpty {
+                                Text(topic.summary)
+                                    .scaledFont(.caption)
                                     .foregroundStyle(.secondary)
+                                    .lineLimit(2)
                             }
-                            CountText(count: topic.messageIds.count)
                         }
                     }
                     .contextMenu {
@@ -195,9 +202,7 @@ struct SidebarView: View {
                     }
                 }
             } header: {
-                HStack(spacing: 6) {
-                    Text("Topics")
-                    Spacer()
+                SectionHeader(String(localized: "Topics")) {
                     if let err = viewModel.historyError {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).scaledFont(.caption2)
                         Text("Couldn't sort older messages").scaledFont(.caption2).foregroundStyle(.secondary)
@@ -213,7 +218,7 @@ struct SidebarView: View {
                 }
             }
 
-            Section("Follow-ups (\(viewModel.openLoopCount))") {
+            Section {
                 // Re-checks once a minute so snoozes end and due dates turn
                 // overdue on time.
                 TimelineView(.periodic(from: .now, by: 60)) { context in
@@ -253,9 +258,29 @@ struct SidebarView: View {
                         }
                     }
                 }
+            } header: {
+                SectionHeader(String(localized: "Follow-ups")) {
+                    if viewModel.openLoopCount > 0 {
+                        Text("\(viewModel.openLoopCount)")
+                            .labelFont(.caption2, weight: .semibold)
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel(String(localized: "^[\(viewModel.openLoopCount) open follow-up](inflect: true)"))
+                    }
+                }
             }
         }
         .listStyle(.sidebar)
+        // Topic and follow-up counts for the conversations that aren't open,
+        // from what Weft saved for them. Re-read when the list of
+        // conversations changes and when another one is opened (the one
+        // just left was live until now).
+        .task(id: SavedCountsKey(chats: viewModel.followedChats.map(\.id), open: viewModel.settings.selectedChatRowID)) {
+            savedCounts = Dictionary(uniqueKeysWithValues: viewModel.followedChats.compactMap { chat in
+                SegmentationCache.load(chatId: chat.id).map {
+                    (chat.id, ConversationCounts(topics: $0.topics.count, followUps: $0.loops.filter { $0.status == .open }.count))
+                }
+            })
+        }
         // The list's selection highlight (the open conversation) in that
         // conversation's own colour.
         .tint(palette.tint)
@@ -332,7 +357,7 @@ struct SidebarView: View {
                         Text(loop.isOverdue(at: now)
                              ? String(localized: "Overdue · \(due.formatted(.dateTime.month(.abbreviated).day()))")
                              : String(localized: "Due \(due.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))"))
-                            .scaledFont(.caption2)
+                            .labelFont(.caption2)
                             .foregroundStyle(loop.isOverdue(at: now) ? Color.red : Color.secondary)
                     }
                 }
@@ -346,8 +371,66 @@ struct SidebarView: View {
         }
     }
 
+    /// What to say under a conversation's name: live for the open one,
+    /// saved for the others; nothing until Weft has sorted it.
+    private func counts(for chat: ChatInfo, isOpen: Bool) -> ConversationCounts? {
+        if isOpen, !viewModel.topics.isEmpty {
+            return ConversationCounts(topics: viewModel.topics.count, followUps: viewModel.openLoopCount)
+        }
+        return savedCounts[chat.id]
+    }
+
     private func chatTitle(_ chat: ChatInfo) -> String {
         chat.participants.isEmpty ? String(localized: "Conversation") : ContactNames.shared.display(chat.participants)
+    }
+}
+
+/// Topics and open follow-ups of one conversation, for its sidebar row.
+struct ConversationCounts: Equatable {
+    let topics: Int
+    let followUps: Int
+
+    /// "4 topics · 2 follow-ups" (the follow-ups only when there are some).
+    var summary: String {
+        let topicsPart = topics == 1
+            ? String(localized: "1 topic", comment: "Under a conversation's name")
+            : String(localized: "\(topics) topics", comment: "Under a conversation's name")
+        guard followUps > 0 else { return topicsPart }
+        let loopsPart = followUps == 1
+            ? String(localized: "1 follow-up", comment: "Under a conversation's name")
+            : String(localized: "\(followUps) follow-ups", comment: "Under a conversation's name")
+        return topicsPart + " · " + loopsPart
+    }
+}
+
+private struct SavedCountsKey: Equatable {
+    let chats: [Int64]
+    let open: Int64?
+}
+
+/// "CONVERSATIONS", "TOPICS": small, spaced capitals with room on the right
+/// for a button or a status.
+private struct SectionHeader<Trailing: View>: View {
+    let title: String
+    @ViewBuilder let trailing: () -> Trailing
+
+    init(_ title: String, @ViewBuilder trailing: @escaping () -> Trailing = { EmptyView() }) {
+        self.title = title
+        self.trailing = trailing
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .textCase(.uppercase)
+                .labelFont(.caption2, weight: .semibold)
+                .tracking(0.6)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel(title)
+            Spacer()
+            trailing()
+        }
+        .padding(.bottom, 2)
     }
 }
 
@@ -360,14 +443,22 @@ private struct ConversationRow<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        HStack(alignment: .center) { content() }
+        HStack(alignment: .center, spacing: 10) { content() }
             .padding(.vertical, 6)
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            // The list draws the selection highlight itself (tinted with the
-            // conversation's colour, see `.tint` on the list), so no fill here.
             .fontWeight(isSelected ? .semibold : .regular)
+            // Our own highlight in the conversation's colour, in place of
+            // the list's. The list's own changed with window focus (grey
+            // when another window was in front) and blended oddly with the
+            // tint; this one is the same soft fill as the topic rows.
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(isSelected ? highlight : Color.clear)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+            )
             .listRowInsets(EdgeInsets(top: 1, leading: 4, bottom: 1, trailing: 4))
             // VoiceOver: one element, activates like a button. Keyboard:
             // Conversations menu, ⌘1–⌘9.
@@ -380,13 +471,16 @@ private struct ConversationRow<Content: View>: View {
 /// conversation's colour).
 private struct SidebarRow<Content: View>: View {
     let isSelected: Bool
+    var alignment: VerticalAlignment = .firstTextBaseline
     let action: () -> Void
     @ViewBuilder let content: () -> Content
     @Environment(\.conversationPalette) private var palette
 
     var body: some View {
         Button(action: action) {
-            HStack(alignment: .firstTextBaseline) { content() }
+            HStack(alignment: alignment, spacing: 10) { content() }
+                // Rows size to their text; a thread bar then fills the height.
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.vertical, 7)
                 .padding(.horizontal, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -402,13 +496,15 @@ private struct SidebarRow<Content: View>: View {
     }
 }
 
+/// A message count; nothing at all when it's zero.
 private struct CountText: View {
     let count: Int
 
     var body: some View {
-        Text("\(count)")
-            .scaledFont(.caption)
-            .monospacedDigit()
-            .foregroundStyle(.secondary)
+        if count > 0 {
+            Text("\(count)")
+                .labelFont(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 }

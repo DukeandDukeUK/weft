@@ -38,22 +38,29 @@ enum TextScale {
         }
     }
 
-    static func font(_ style: Font.TextStyle, weight: Font.Weight? = nil, scale: Double) -> Font {
-        .system(size: baseSize(style) * scale, weight: weight ?? (style == .headline ? .bold : .regular))
+    static func font(_ style: Font.TextStyle, weight: Font.Weight? = nil, design: Font.Design? = nil, scale: Double) -> Font {
+        .system(size: baseSize(style) * scale, weight: weight ?? (style == .headline ? .bold : .regular), design: design ?? .default)
     }
 }
 
 private struct ScaledFont: ViewModifier {
     let style: Font.TextStyle
     let weight: Font.Weight?
+    let design: Font.Design?
     func body(content: Content) -> some View {
-        content.font(TextScale.font(style, weight: weight, scale: AppSettings.shared.textScale))
+        content.font(TextScale.font(style, weight: weight, design: design, scale: AppSettings.shared.textScale))
     }
 }
 
 extension View {
     /// A standard text style, at Weft's chosen text size.
     func scaledFont(_ style: Font.TextStyle, weight: Font.Weight? = nil) -> some View {
-        modifier(ScaledFont(style: style, weight: weight))
+        modifier(ScaledFont(style: style, weight: weight, design: nil))
+    }
+
+    /// Weft's label face: the rounded system font with lined-up digits, for
+    /// counts, times, dates and section headers. Scales with Text Size.
+    func labelFont(_ style: Font.TextStyle, weight: Font.Weight? = nil) -> some View {
+        modifier(ScaledFont(style: style, weight: weight, design: .rounded)).monospacedDigit()
     }
 }
