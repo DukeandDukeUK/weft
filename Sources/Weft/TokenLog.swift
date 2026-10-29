@@ -30,6 +30,20 @@ enum CallPurpose: String, Sendable, Codable {
     case summary = "Topic summary"
     case other = "Other"
 
+    /// How long one call may take before Weft gives up on it. A filing call
+    /// normally takes ~5 s; a stalled AI tool used to hold everything for
+    /// the old 10-minute limit. Full sorts really can take minutes.
+    var timeLimit: TimeInterval {
+        switch self {
+        case .filing, .summary, .connectionTest: return 60
+        case .history: return 180
+        case .fullSort, .openLoops, .other: return 600
+        }
+    }
+
+    /// Worth one immediate retry after a time-out (small, repeatable jobs).
+    var retriesAfterTimeout: Bool { self == .filing || self == .summary || self == .history }
+
     /// On-screen name (the stored names above stay as they are so older
     /// logs still load).
     /// Shown in Settings; the raw value is what the log file stores.

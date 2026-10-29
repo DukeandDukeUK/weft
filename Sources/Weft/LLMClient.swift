@@ -223,12 +223,32 @@ struct LLMClient: Sendable {
         let usage: TokenUsage?
         switch provider {
         case .claude, .codex, .gemini, .grok:
-            let p = provider, m = model, e = effort, f = fast
+            let p = provider, m = model, e = effort, f = fast, limit = purpose.timeLimit
             // Off the concurrency pool: the tool can take minutes, and a
             // blocked pool thread would stall the rest of the app.
-            (reply, usage) = try await BlockingWork.run {
-                try CLIRunner.run(provider: p, model: m, effort: e, fast: f, systemPrompt: systemPrompt, input: userPrompt)
+            func attempt() async throws -> (String, TokenUsage?) {
+                try await BlockingWork.run {
+                    try CLIRunner.run(provider: p, model: m, effort: e, fast: f, systemPrompt: systemPrompt, input: userPrompt, timeout: limit)
+                }
             }
+            let started = Date()
+            ActivityLog.write("AI call start: \(purpose.rawValue) via \(p.rawValue) \(m)")
+            do {
+                (reply, usage) = try await attempt()
+            } catch ClientError.timedOut where purpose.retriesAfterTimeout {
+                // A stalled tool: it's been stopped; one fresh try.
+                ActivityLog.write("AI call timed out after \(Int(limit)) s (\(purpose.rawValue)); retrying once")
+                do {
+                    (reply, usage) = try await attempt()
+                } catch {
+                    ActivityLog.write("AI call failed again: \(purpose.rawValue): \(ActivityLog.kind(of: error))")
+                    throw error
+                }
+            } catch {
+                ActivityLog.write("AI call failed: \(purpose.rawValue) after \(Int(Date().timeIntervalSince(started))) s: \(ActivityLog.kind(of: error))")
+                throw error
+            }
+            ActivityLog.write("AI call done: \(purpose.rawValue) in \(String(format: "%.1f", Date().timeIntervalSince(started))) s")
         case .ollama, .lmstudio:
             guard !model.isEmpty else { throw ClientError.noLocalModel(provider) }
             (reply, usage) = try await LocalServer.complete(provider: provider, model: model, systemPrompt: systemPrompt, userPrompt: userPrompt)
@@ -254,7 +274,8 @@ struct LLMClient: Sendable {
 
 enum CLIRunner {
     /// Returns the reply and, where the tool reports them, its token counts.
-    static func run(provider: Provider, model: String, effort: String, fast: Bool = false, systemPrompt: String, input: String) throws -> (String, TokenUsage?) {
+    static func run(provider: Provider, model: String, effort: String, fast: Bool = false, systemPrompt: String, input: String,
+                    timeout: TimeInterval = LLMClient.timeout) throws -> (String, TokenUsage?) {
         guard let name = provider.executableName, let path = CommandLocator.find(name) else {
             throw LLMClient.ClientError.notInstalled(provider)
         }
@@ -373,8 +394,10 @@ enum CLIRunner {
             errData = errPipe.fileHandleForReading.readDataToEndOfFile()
             group.leave()
         }
-        if group.wait(timeout: .now() + LLMClient.timeout) == .timedOut {
-            proc.terminate()
+        if group.wait(timeout: .now() + timeout) == .timedOut {
+            // Stop the tool AND anything it started (Codex runs a helper
+            // process): a helper left running keeps the output open.
+            ProcessTree.terminate(proc.processIdentifier)
             throw LLMClient.ClientError.timedOut
         }
         proc.waitUntilExit()

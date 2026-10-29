@@ -13,6 +13,7 @@ final class WeftTests: XCTestCase {
         scratch = FileManager.default.temporaryDirectory.appendingPathComponent("weft-tests-\(UUID().uuidString)")
         SegmentationCache.directoryOverride = scratch
         TokenLog.fileOverride = scratch.appendingPathComponent("token-log.json")
+        ActivityLog.fileOverride = scratch.appendingPathComponent("activity.log")
         AppSettings.shared.provider = .claude
     }
 
@@ -1003,6 +1004,46 @@ final class WeftTests: XCTestCase {
             .write(to: snapshot.appending(path: "Info.plist"))
         XCTAssertEqual(ConversationBackgrounds.isDark(forChat: "+15550000001", in: root), true)
         XCTAssertNil(ConversationBackgrounds.isDark(forChat: "+15550000002", in: root), "no preview: follow the Mac")
+    }
+
+    // MARK: - 0.4.17 no more long stalls
+
+    func testTimeLimitsAndBackoff() {
+        XCTAssertEqual(CallPurpose.filing.timeLimit, 60, "a filing call normally takes ~5 s")
+        XCTAssertEqual(CallPurpose.fullSort.timeLimit, 600)
+        XCTAssertTrue(CallPurpose.filing.retriesAfterTimeout)
+        XCTAssertFalse(CallPurpose.fullSort.retriesAfterTimeout)
+        XCTAssertEqual((1...7).map { BackgroundSorter.backoffDelay(afterFailures: $0) }, [30, 60, 120, 240, 480, 600, 600])
+    }
+
+    // A failing background filing backs off instead of retrying every check.
+    func testFailingBackgroundFilingBacksOff() async throws {
+        let chat: Int64 = 9701
+        let (bg, settings, restore) = try backgroundFixture(chat: chat)
+        defer { restore() }
+        var calls = 0
+        LLMClient.testResponder = { _, _ in calls += 1; throw LLMClient.ClientError.timedOut }
+        bg.reminderSync = { _, _, _, _ in }
+        await bg.run(settings: settings) { nil }
+        await bg.run(settings: settings) { nil }
+        await bg.run(settings: settings) { nil }
+        XCTAssertEqual(calls, 1, "retried straight away instead of waiting")
+        XCTAssertEqual(bg.backoff[chat]?.failures, 1)
+    }
+
+    // Stopping a stalled tool also stops what it started.
+    func testStoppingAProcessStopsItsChildren() throws {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/sh")
+        proc.arguments = ["-c", "sleep 300 & wait"]
+        try proc.run()
+        Thread.sleep(forTimeInterval: 0.3)
+        let kids = ProcessTree.children(of: proc.processIdentifier)
+        XCTAssertEqual(kids.count, 1, "the shell's sleep child")
+        ProcessTree.terminate(proc.processIdentifier)
+        proc.waitUntilExit()
+        Thread.sleep(forTimeInterval: 0.2)
+        XCTAssertNotEqual(kill(kids[0], 0), 0, "the child was left running")
     }
 
     // MARK: - 0.4.16 read in Messages = not new in Weft

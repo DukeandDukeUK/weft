@@ -96,13 +96,22 @@ final class BackgroundSorter {
                                          conversationName: conversationName(chat), settings: settings)
             }
             // Paused conversations: still counted for the badge, never sent.
-            if !settings.pausedChats.contains(chat) {
+            // A conversation whose last filing failed waits before retrying.
+            if !settings.pausedChats.contains(chat), (backoff[chat]?.until ?? .distantPast) <= Date() {
                 working = chat
                 await fileNew(chat: chat, settings: settings, openChat: openChat)
                 working = nil
             }
         }
         onChange?()
+    }
+
+    /// Conversations whose background filing failed: how often, and when to
+    /// try again.
+    private(set) var backoff: [Int64: (failures: Int, until: Date)] = [:]
+
+    static func backoffDelay(afterFailures n: Int) -> TimeInterval {
+        min(30 * pow(2, Double(max(n, 1) - 1)), 600)
     }
 
     private func fileNew(chat: Int64, settings: AppSettings, openChat: @MainActor () -> Int64?) async {
@@ -127,12 +136,25 @@ final class BackgroundSorter {
                 return (m, titleByID[m.id] ?? "unsorted")
             }
         client.effort = "low"
-        guard let result = try? await TopicFiler(client: client).file(
-            newMessages: fresh,
-            context: context,
-            topics: candidates,
-            openLoops: saved.loops.filter { $0.status == .open }
-        ) else { return } // try again on the next change
+        ActivityLog.write("background filing: chat \(chat), \(fresh.count) new")
+        let result: TopicFiler.Result
+        do {
+            result = try await TopicFiler(client: client).file(
+                newMessages: fresh,
+                context: context,
+                topics: candidates,
+                openLoops: saved.loops.filter { $0.status == .open }
+            )
+            backoff[chat] = nil
+        } catch {
+            // Wait longer after each failure (30 s, 1, 2, 4, 8, then 10 min)
+            // instead of retrying on every check.
+            let failures = (backoff[chat]?.failures ?? 0) + 1
+            let wait = Self.backoffDelay(afterFailures: failures)
+            backoff[chat] = (failures, Date().addingTimeInterval(wait))
+            ActivityLog.write("background filing failed: chat \(chat) (\(ActivityLog.kind(of: error))); next try in \(Int(wait)) s")
+            return
+        }
 
         var topics = saved.topics
         var filed = Set<Int64>()

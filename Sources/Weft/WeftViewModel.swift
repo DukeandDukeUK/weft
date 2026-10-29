@@ -1314,6 +1314,7 @@ final class WeftViewModel {
         // Oldest first, and no more than this AI can take in one call —
         // the rest wait for the next pass.
         let batch = Self.batch(allPending, local: settings.provider?.isLocal ?? false)
+        ActivityLog.write("filing: open chat \(myChat), \(batch.count) new")
         isAnalyzing = true
         defer { isAnalyzing = false }
         let mySession = session
